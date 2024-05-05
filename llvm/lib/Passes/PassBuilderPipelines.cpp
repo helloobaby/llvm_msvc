@@ -2062,14 +2062,14 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
       MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
   }
 
-  ModulePassManager CoroPM;
-  CoroPM.addPass(CoroEarlyPass());
-  CGSCCPassManager CGPM;
-  CGPM.addPass(CoroSplitPass());
-  CoroPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(std::move(CGPM)));
-  CoroPM.addPass(CoroCleanupPass());
-  CoroPM.addPass(GlobalDCEPass());
-  MPM.addPass(CoroConditionalWrapper(std::move(CoroPM)));
+  //ModulePassManager CoroPM;
+  //CoroPM.addPass(CoroEarlyPass());
+  //CGSCCPassManager CGPM;
+  //CGPM.addPass(CoroSplitPass());
+  //CoroPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(std::move(CGPM)));
+  //CoroPM.addPass(CoroCleanupPass());
+  //CoroPM.addPass(GlobalDCEPass());
+  //MPM.addPass(CoroConditionalWrapper(std::move(CoroPM)));
 
   invokeOptimizerLastEPCallbacks(MPM, Level);
 

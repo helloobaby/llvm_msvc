@@ -697,7 +697,12 @@ struct DestoryStack : public FunctionPass {
   static char ID;
   DestoryStack() : FunctionPass(ID){};
 
+  virtual StringRef getPassName() const { return "DestoryStack Pass";}
+
   bool runOnFunction(Function &F) override {
+      // https://github.com/llvm-mirror/llvm/blob/2c4ca6832fa6b306ee6a7010bfb80a3f2596f824/unittests/IR/FunctionTest.cpp#L130
+    //F.setSection(".obf");
+    //llvm::outs() << " section " << F.getSection();
 
     WithColor(outs(), HighlightColor::String)
         << "[MyInfo] DestoryStack Pass Entry ... \n";
@@ -820,7 +825,7 @@ struct DestoryStack : public FunctionPass {
         BranchInst *newBranch =
         Builder.CreateCondBr(condition, originalBB, destoryStackBlock);
 
-
+        
 
     // 创建返回指令
     //builder.CreateRetVoid();
@@ -845,6 +850,7 @@ Pass *createDestroyStackPass() { return new DestoryStack(); }
  #1 0x00007ff724ae3ff0 clang::CodeGenOptions::getVecLib
 C:\workspace2\llvm-msvc\clang\include\clang\Basic\CodeGenOptions.def:365:0 #2
 0x00007ff724ae3ff0 `anonymous namespace'::EmitAssemblyHelper::AddEmitPasses
+
 C:\workspace2\llvm-msvc\clang\lib\CodeGen\BackendUtil.cpp:676:0 #3
 0x00007ff724ae6210 `anonymous namespace'::EmitAssemblyHelper::RunCodegenPipeline
 C:\workspace2\llvm-msvc\clang\lib\CodeGen\BackendUtil.cpp:1283:0 #4
@@ -944,11 +950,8 @@ bool EmitAssemblyHelper::AddEmitPasses(legacy::PassManager &CodeGenPasses,
   // 这里加的Pass应该是最后才执行的
   //CodeGenPasses.add(createHelloPass());
   //Q:为什么这里加了Pass,函数的ll是变了的,但是实际编译出来的汇编没有变呢
-  //    B.addAttribute(llvm::Attribute::OptimizeNone);
   //A:
-  CodeGenPasses.add(createDestroyStackPass());
-
-
+  //CodeGenPasses.add(createDestroyStackPass());
 
 
 
@@ -1432,7 +1435,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   // Post pass
   {
     // Welcome to llvm-msvc pass
-    MPM.addPass(WelcomeToLLVMMSVCPass(true));
+    //MPM.addPass(WelcomeToLLVMMSVCPass(true));
     
     // IR auto generator pass(Post)
     MPM.addPass(IRAutoGeneratorPostPass(CodeGenOpts.AutoGenerateIR,
@@ -1541,6 +1544,7 @@ void EmitAssemblyHelper::RunCodegenPipeline(
                        DwoOS ? &DwoOS->os() : nullptr))
       // FIXME: Should we handle this error differently?
       return;
+    CodeGenPasses.add(createDestroyStackPass()); // 这里可以保证Pass是最后一个被执行的
     break;
   default:
     return;
@@ -1578,6 +1582,8 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
   cl::PrintOptionValues();
 
   std::unique_ptr<llvm::ToolOutputFile> ThinLinkOS, DwoOS;
+
+  // 
   RunOptimizationPipeline(Action, OS, ThinLinkOS, BC);
   RunCodegenPipeline(Action, OS, DwoOS);
 

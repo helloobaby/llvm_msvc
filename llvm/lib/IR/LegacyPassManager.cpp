@@ -1186,8 +1186,8 @@ void PMDataManager::dumpPassArguments() const {
 void PMDataManager::dumpPassInfo(Pass *P, enum PassDebuggingString S1,
                                  enum PassDebuggingString S2,
                                  StringRef Msg) {
-  if (PassDebugging < Executions)
-    return;
+  //if (PassDebugging < Executions)
+  //  return;
   dbgs() << "[" << std::chrono::system_clock::now() << "] " << (void *)this
          << std::string(getDepth() * 2 + 1, ' ');
   switch (S1) {
@@ -1234,8 +1234,8 @@ void PMDataManager::dumpRequiredSet(const Pass *P) const {
 }
 
 void PMDataManager::dumpPreservedSet(const Pass *P) const {
-  if (PassDebugging < Details)
-    return;
+  //if (PassDebugging < Details)
+  //  return;
 
   AnalysisUsage analysisUsage;
   P->getAnalysisUsage(analysisUsage);
@@ -1243,8 +1243,8 @@ void PMDataManager::dumpPreservedSet(const Pass *P) const {
 }
 
 void PMDataManager::dumpUsedSet(const Pass *P) const {
-  if (PassDebugging < Details)
-    return;
+  //if (PassDebugging < Details)
+  //  return;
 
   AnalysisUsage analysisUsage;
   P->getAnalysisUsage(analysisUsage);
