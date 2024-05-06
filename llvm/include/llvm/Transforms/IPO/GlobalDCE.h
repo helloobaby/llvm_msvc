@@ -78,6 +78,20 @@ private:
   void ComputeDependencies(Value *V, SmallPtrSetImpl<GlobalValue *> &U);
 };
 
-}
+class DCEPassTest : public PassInfoMixin<DCEPassTest> {
+public:
+  DCEPassTest(){}
+  PreservedAnalyses run(Module& M, ModuleAnalysisManager&) {
+    llvm::outs() << "[DCEPassTest] Module Name " << M.getName();
+    for (auto &f : M.getFunctionList()) {
+      llvm::outs() << "[DCEPassTest] " << f.getName();
+    }
 
+    return PreservedAnalyses::none();
+  }
+};
+
+
+
+}
 #endif // LLVM_TRANSFORMS_IPO_GLOBALDCE_H

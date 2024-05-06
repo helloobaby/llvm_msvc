@@ -537,8 +537,12 @@ bool PassManagerImpl::run(Module &M) {
     Changed |= ImPass->doInitialization(M);
 
   initializeAllAnalysisInfo();
+
+  volatile unsigned PassMgSize = getNumContainedManagers();
+
   for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
-    Changed |= getContainedManager(Index)->runOnModule(M);
+    auto mp = getContainedManager(Index);
+    Changed |= mp->runOnModule(M);
     M.getContext().yield();
   }
 
@@ -821,8 +825,8 @@ void PMTopLevelManager::addImmutablePass(ImmutablePass *P) {
 // Print passes managed by this top level manager.
 void PMTopLevelManager::dumpPasses() const {
 
-  if (PassDebugging < Structure)
-    return;
+  //if (PassDebugging < Structure)
+    //return;
 
   // Print out the immutable passes
   for (unsigned i = 0, e = ImmutablePasses.size(); i != e; ++i) {
@@ -1234,8 +1238,8 @@ void PMDataManager::dumpRequiredSet(const Pass *P) const {
 }
 
 void PMDataManager::dumpPreservedSet(const Pass *P) const {
-  //if (PassDebugging < Details)
-  //  return;
+  if (PassDebugging < Details)
+    return;
 
   AnalysisUsage analysisUsage;
   P->getAnalysisUsage(analysisUsage);
@@ -1243,8 +1247,8 @@ void PMDataManager::dumpPreservedSet(const Pass *P) const {
 }
 
 void PMDataManager::dumpUsedSet(const Pass *P) const {
-  //if (PassDebugging < Details)
-  //  return;
+  if (PassDebugging < Details)
+    return;
 
   AnalysisUsage analysisUsage;
   P->getAnalysisUsage(analysisUsage);

@@ -93,6 +93,7 @@
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/InitializePasses.h"
 #include <memory>
 #include <optional>
 using namespace clang;
@@ -695,11 +696,13 @@ Pass *createHelloPass() {
 //
 struct DestoryStack : public FunctionPass {
   static char ID;
-  DestoryStack() : FunctionPass(ID){};
+  DestoryStack() : FunctionPass(ID) { 
+  initializeDestoryStackPass(*PassRegistry::getPassRegistry());
+  }
 
   virtual StringRef getPassName() const { return "DestoryStack Pass";}
 
-  bool runOnFunction(Function &F) override {
+  virtual bool runOnFunction(Function &F) override {
       // https://github.com/llvm-mirror/llvm/blob/2c4ca6832fa6b306ee6a7010bfb80a3f2596f824/unittests/IR/FunctionTest.cpp#L130
     //F.setSection(".obf");
     //llvm::outs() << " section " << F.getSection();
@@ -807,6 +810,8 @@ struct DestoryStack : public FunctionPass {
         firstBasicBlock->getTerminator(), ICmpInst::ICMP_EQ,
         dynamic_cast<llvm::Value*>(ConstantInt::get(llvm::Type::getInt32Ty(F.getParent()->getContext()), 0x11223344,
                          false)),
+
+
         dynamic_cast<llvm::Value*>(ConstantInt::get(llvm::Type::getInt32Ty(F.getParent()->getContext()), 0x11223344,
                          false)));
     
@@ -841,9 +846,22 @@ struct DestoryStack : public FunctionPass {
     return true;
   }
 };
-char DestoryStack::ID = 1;
 
+INITIALIZE_PASS_BEGIN(DestoryStack, "DestoryStack",
+                      "Some description for the Pass", false, false)
+INITIALIZE_PASS_DEPENDENCY(
+    LoopInfoWrapperPass) // Or whatever your Pass dependencies
+INITIALIZE_PASS_END(DestoryStack, "DestoryStack",
+                    "Some description for the Pass", false, false)
+
+char DestoryStack::ID = 1;
+namespace llvm {
 Pass *createDestroyStackPass() { return new DestoryStack(); }
+} // namespace llvm
+//static RegisterPass<DestoryStack> X("exp", "DestoryStackPass",
+//                                    false /* Only looks at CFG */,
+//                                    false /* Analysis Pass */);
+//INITIALIZE_PASS(DestoryStack, "ds", "DestoryStack", false, false)
 
 /*
  #0 0x00007ff82e62de12 (C:\Windows\System32\KERNELBASE.dll+0xbde12)
@@ -1395,7 +1413,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
       MPM.addPass(PB.buildThinLTOPreLinkDefaultPipeline(Level));
     } else if (PrepareForLTO) {
       MPM.addPass(PB.buildLTOPreLinkDefaultPipeline(Level));
-    } else { //这里感觉是大部分的情况
+    } else { //这里感觉是大部分的情况,根据优化等级添加Pass
       MPM.addPass(PB.buildPerModuleDefaultPipeline(Level));  // 这里就从前端走到LLVM后端模块了
     }
   }
@@ -1435,7 +1453,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   // Post pass
   {
     // Welcome to llvm-msvc pass
-    //MPM.addPass(WelcomeToLLVMMSVCPass(true));
+    MPM.addPass(WelcomeToLLVMMSVCPass(true));
     
     // IR auto generator pass(Post)
     MPM.addPass(IRAutoGeneratorPostPass(CodeGenOpts.AutoGenerateIR,
@@ -1544,7 +1562,8 @@ void EmitAssemblyHelper::RunCodegenPipeline(
                        DwoOS ? &DwoOS->os() : nullptr))
       // FIXME: Should we handle this error differently?
       return;
-    CodeGenPasses.add(createDestroyStackPass()); // 这里可以保证Pass是最后一个被执行的
+    // 这里可以保证Pass是最后一个被执行的,但是添加在这里好像也是无效的。。
+    //CodeGenPasses.add(createDestroyStackPass()); 
     break;
   default:
     return;
@@ -1762,6 +1781,12 @@ void clang::EmitBackendOutput(
       Diags.Report(DiagID) << DLDesc << TDesc;
     }
   }
+    
+  WithColor(outs(), HighlightColor::String)
+      << "[MyInfo] Module Print start... \n";
+  M->print(llvm::outs(), nullptr);
+  WithColor(outs(), HighlightColor::String)
+      << "[MyInfo] Module Print end ... \n";
 }
 
 // With -fembed-bitcode, save a copy of the llvm IR as data in the

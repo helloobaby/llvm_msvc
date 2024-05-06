@@ -1981,6 +1981,7 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
 }
 
 // O0优化的一些Pass
+// Clang默认参数就是-O0
 ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
                                                       bool LTOPreLink) {
   assert(Level == OptimizationLevel::O0 &&
@@ -2062,14 +2063,20 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
       MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
   }
 
-  //ModulePassManager CoroPM;
-  //CoroPM.addPass(CoroEarlyPass());
-  //CGSCCPassManager CGPM;
-  //CGPM.addPass(CoroSplitPass());
-  //CoroPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(std::move(CGPM)));
-  //CoroPM.addPass(CoroCleanupPass());
-  //CoroPM.addPass(GlobalDCEPass());
-  //MPM.addPass(CoroConditionalWrapper(std::move(CoroPM)));
+  ModulePassManager CoroPM;
+  CoroPM.addPass(CoroEarlyPass());
+  CGSCCPassManager CGPM;
+  CGPM.addPass(CoroSplitPass());
+  CoroPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(std::move(CGPM)));
+  CoroPM.addPass(CoroCleanupPass());
+  CoroPM.addPass(GlobalDCEPass());
+
+  // 这里加Pass不执行
+  //CoroPM.addPass(DCEPassTest());
+  MPM.addPass(CoroConditionalWrapper(std::move(CoroPM)));
+
+  // 这里加Pass不执行
+  //MPM.addPass(DCEPassTest());
 
   invokeOptimizerLastEPCallbacks(MPM, Level);
 

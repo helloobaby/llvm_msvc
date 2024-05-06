@@ -26,4 +26,5 @@ void llvm::initializeIPO(PassRegistry &Registry) {
   initializeLoopExtractorLegacyPassPass(Registry);
   initializeSingleLoopExtractorPass(Registry);
   initializeBarrierNoopPass(Registry);
+  //initializeDestoryStackPass(Registry);
 }
