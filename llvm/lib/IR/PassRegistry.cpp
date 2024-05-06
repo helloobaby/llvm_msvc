@@ -21,6 +21,7 @@
 
 using namespace llvm;
 
+// 有点类似于单例模式了,对象只能通过这个接口拿
 PassRegistry *PassRegistry::getPassRegistry() {
   static PassRegistry PassRegistryObj;
   return &PassRegistryObj;
@@ -48,10 +49,11 @@ const PassInfo *PassRegistry::getPassInfo(StringRef Arg) const {
 
 void PassRegistry::registerPass(const PassInfo &PI, bool ShouldFree) {
   sys::SmartScopedWriter<true> Guard(Lock);
+  // 注册其实就是插入到这个PassINfoMap里
   bool Inserted =
       PassInfoMap.insert(std::make_pair(PI.getTypeInfo(), &PI)).second;
   assert(Inserted && "Pass registered multiple times!");
-  (void)Inserted;
+  (void)Inserted; // 这行代码干嘛的?
   PassInfoStringMap[PI.getPassArgument()] = &PI;
 
   // Notify any listeners.

@@ -858,9 +858,9 @@ char DestoryStack::ID = 1;
 namespace llvm {
 Pass *createDestroyStackPass() { return new DestoryStack(); }
 } // namespace llvm
-//static RegisterPass<DestoryStack> X("exp", "DestoryStackPass",
-//                                    false /* Only looks at CFG */,
-//                                    false /* Analysis Pass */);
+static RegisterPass<DestoryStack> X("exp", "DestoryStackPass",
+                                    false /* Only looks at CFG */,
+                                    false /* Analysis Pass */);
 //INITIALIZE_PASS(DestoryStack, "ds", "DestoryStack", false, false)
 
 /*
@@ -1430,7 +1430,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   // the code-generation pipeline.
   // Since we already added a verifier pass above, this
   // might even not run the analysis, if previous passes caused no changes.
-  if (!actionRequiresCodeGen(Action) && CodeGenOpts.VerifyModule)
+  if (!actionRequiresCodeGen(Action) && CodeGenOpts.VerifyModule) // 这个addPass是加在PassManager::Passes Vector里面的
     MPM.addPass(VerifierPass());
 
   // Pre pass

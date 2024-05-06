@@ -419,6 +419,7 @@ protected:
   PMTopLevelManager *TPM = nullptr;
 
   // Collection of pass that are managed by this manager
+  // 这里好像是存储真正Pass的地方,那那个RegisterPass存储的那个Map是干啥的?
   SmallVector<Pass *, 16> PassVector;
 
   // Collection of Analysis provided by Parent pass manager and
