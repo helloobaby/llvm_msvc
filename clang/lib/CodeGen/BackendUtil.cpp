@@ -694,15 +694,16 @@ Pass *createHelloPass() {
 //
 //
 //
-struct DestoryStack : public FunctionPass {
-  static char ID;
-  DestoryStack() : FunctionPass(ID) { 
-  initializeDestoryStackPass(*PassRegistry::getPassRegistry());
-  }
+class DestoryStack : public PassInfoMixin<DestoryStack> {
+public:
+  //static char ID;
+  /*DestoryStack(){ 
+  }*/
 
   virtual StringRef getPassName() const { return "DestoryStack Pass";}
 
-  virtual bool runOnFunction(Function &F) override {
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM)
+  {
       // https://github.com/llvm-mirror/llvm/blob/2c4ca6832fa6b306ee6a7010bfb80a3f2596f824/unittests/IR/FunctionTest.cpp#L130
     //F.setSection(".obf");
     //llvm::outs() << " section " << F.getSection();
@@ -710,9 +711,12 @@ struct DestoryStack : public FunctionPass {
     WithColor(outs(), HighlightColor::String)
         << "[MyInfo] DestoryStack Pass Entry ... \n";
 
+    bool Changed = false;
+
       // 先只限制在main函数试试看
       if (F.getName() != "main") {
-        return false;
+        return (Changed ? llvm::PreservedAnalyses::none()
+                      : llvm::PreservedAnalyses::all());
     }
 
 
@@ -744,7 +748,8 @@ struct DestoryStack : public FunctionPass {
     if (i1 == basicBlock->end()) {
       WithColor(outs(), HighlightColor::String)
           << "[MyInfo] Dont find non AllocaInsn .Exit DestoryStack Pass ... \n";
-      return false;
+      return (Changed ? llvm::PreservedAnalyses::none()
+                      : llvm::PreservedAnalyses::all());
     }
 
       Twine *var;
@@ -756,7 +761,7 @@ struct DestoryStack : public FunctionPass {
     originalBB->print(outs());
           WithColor(outs(), HighlightColor::String)
               << "[MyInfo] originalBB dump end ... \n";
-
+    Changed = true;
     /*
   %3 = alloca i32, align 4
   %4 = alloca ptr, align 8
@@ -789,6 +794,7 @@ struct DestoryStack : public FunctionPass {
   br i1 %8, label %9, label %10
     */
 
+    
     auto firstBasicBlock = &*F.begin();
 
     // 在originalBB最后创建一个分支指令
@@ -842,26 +848,28 @@ struct DestoryStack : public FunctionPass {
 
 
     F.print(outs());
+
     // As usual, a true value should be returned if the function is modified.
-    return true;
+    return (Changed ? llvm::PreservedAnalyses::none()
+                    : llvm::PreservedAnalyses::all());
   }
 };
 
-INITIALIZE_PASS_BEGIN(DestoryStack, "DestoryStack",
-                      "Some description for the Pass", false, false)
-INITIALIZE_PASS_DEPENDENCY(
-    LoopInfoWrapperPass) // Or whatever your Pass dependencies
-INITIALIZE_PASS_END(DestoryStack, "DestoryStack",
-                    "Some description for the Pass", false, false)
-
-char DestoryStack::ID = 1;
-namespace llvm {
-Pass *createDestroyStackPass() { return new DestoryStack(); }
-} // namespace llvm
-static RegisterPass<DestoryStack> X("exp", "DestoryStackPass",
-                                    false /* Only looks at CFG */,
-                                    false /* Analysis Pass */);
-//INITIALIZE_PASS(DestoryStack, "ds", "DestoryStack", false, false)
+//INITIALIZE_PASS_BEGIN(DestoryStack, "DestoryStack",
+//                      "Some description for the Pass", false, false)
+//INITIALIZE_PASS_DEPENDENCY(
+//    LoopInfoWrapperPass) // Or whatever your Pass dependencies
+//INITIALIZE_PASS_END(DestoryStack, "DestoryStack",
+//                    "Some description for the Pass", false, false)
+//
+//char DestoryStack::ID = 1;
+//namespace llvm {
+//Pass *createDestroyStackPass() { return new DestoryStack(); }
+//} // namespace llvm
+//static RegisterPass<DestoryStack> X("exp", "DestoryStackPass",
+//                                    false /* Only looks at CFG */,
+//                                    false /* Analysis Pass */);
+////INITIALIZE_PASS(DestoryStack, "ds", "DestoryStack", false, false)
 
 /*
  #0 0x00007ff82e62de12 (C:\Windows\System32\KERNELBASE.dll+0xbde12)
@@ -1518,13 +1526,6 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   // Print a textual, '-passes=' compatible, representation of pipeline if
   // requested.
 
-    WithColor(outs(), HighlightColor::String) << "[MyInfo] Print All passes ... \n";
-    MPM.printPipeline(outs(), [&PIC](StringRef ClassName) {
-      auto PassName = PIC.getPassNameForClassName(ClassName);
-      return PassName.empty() ? ClassName : PassName;
-    });
-    outs() << "\n";
-    return;
 
   if (LangOpts.HIPStdPar && !LangOpts.CUDAIsDevice &&
       LangOpts.HIPStdParInterposeAlloc)
@@ -1534,6 +1535,19 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   {
     PrettyStackTraceString CrashInfo("Optimizer");
     llvm::TimeTraceScope TimeScope("Optimizer");
+    // https://llvm.org/docs/NewPassManager.html#just-tell-me-how-to-run-the-default-optimization-pipeline-with-the-new-pass-manager
+    
+
+
+        WithColor(outs(), HighlightColor::String)
+        << "[MyInfo] Print All passes ... \n";
+    MPM.printPipeline(outs(), [&PIC](StringRef ClassName) {
+      auto PassName = PIC.getPassNameForClassName(ClassName);
+      return PassName.empty() ? ClassName : PassName;
+    });
+    outs() << "\n";
+    MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
+    
     MPM.run(*TheModule, MAM);
   }
 }
