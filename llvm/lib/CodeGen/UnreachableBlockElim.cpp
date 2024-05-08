@@ -63,6 +63,7 @@ FunctionPass *llvm::createUnreachableBlockEliminationPass() {
 
 PreservedAnalyses UnreachableBlockElimPass::run(Function &F,
                                                 FunctionAnalysisManager &AM) {
+  //return PreservedAnalyses::none();
   bool Changed = llvm::EliminateUnreachableBlocks(F);
   if (!Changed)
     return PreservedAnalyses::all();
@@ -95,6 +96,11 @@ void UnreachableMachineBlockElim::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool UnreachableMachineBlockElim::runOnMachineFunction(MachineFunction &F) {
+  //llvm::outs() << "Force bool "
+  //                "UnreachableMachineBlockElim::runOnMachineFunction("
+  //                "MachineFunction &F) return true";
+  //return false;
+
   df_iterator_default_set<MachineBasicBlock*> Reachable;
   bool ModifiedPHI = false;
 

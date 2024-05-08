@@ -111,6 +111,7 @@ PreservedAnalyses ModuleToFunctionPassAdaptor::run(Module &M,
 
   PreservedAnalyses PA = PreservedAnalyses::all();
   for (Function &F : M) {
+    //llvm::outs() << F.getName() << '\n';
     if (F.isDeclaration())
       continue;
 
@@ -120,6 +121,7 @@ PreservedAnalyses ModuleToFunctionPassAdaptor::run(Module &M,
     if (!PI.runBeforePass<Function>(*Pass, F))
       continue;
 
+    //llvm::outs() << Pass->name() << '\n';
     PreservedAnalyses PassPA = Pass->run(F, FAM);
 
     // We know that the function pass couldn't have invalidated any other

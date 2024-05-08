@@ -702,6 +702,11 @@ public:
 
   virtual StringRef getPassName() const { return "DestoryStack Pass";}
 
+  // 吗的这个函数至关重要,不加这个isRequired Pass不会运行的
+  // https://llvm.org/docs/WritingAnLLVMNewPMPass.html#id8
+  //    if (!PI.runBeforePass<Function>(*Pass, F))
+  //continue;
+  static bool isRequired() { return true; }
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM)
   {
       // https://github.com/llvm-mirror/llvm/blob/2c4ca6832fa6b306ee6a7010bfb80a3f2596f824/unittests/IR/FunctionTest.cpp#L130
@@ -1456,13 +1461,15 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     
     // MSVC macro rebuilding pass (this pass must be at the top)
     MPM.addPassToFront(MSVCMacroRebuildingPass());
+
+    MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
   }
 
   // Post pass
   {
     // Welcome to llvm-msvc pass
     MPM.addPass(WelcomeToLLVMMSVCPass(true));
-    
+    //MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
     // IR auto generator pass(Post)
     MPM.addPass(IRAutoGeneratorPostPass(CodeGenOpts.AutoGenerateIR,
                                           "IRAutoGeneratorPost"));
@@ -1546,7 +1553,9 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
       return PassName.empty() ? ClassName : PassName;
     });
     outs() << "\n";
-    MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
+    //https://llvm.org/docs/NewPassManager.html#id3
+    // 这样写的话应该是对模块内的每一个函数运行DestoryStack这个Pass
+    //MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
     
     MPM.run(*TheModule, MAM);
   }

@@ -55,6 +55,7 @@
 #include "llvm/TargetParser/SubtargetFeature.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/IR/Instruction.h"
 #include <memory>
 #include <optional>
 using namespace llvm;
@@ -459,6 +460,39 @@ static bool addPass(PassManagerBase &PM, const char *argv0,
   return false;
 }
 
+namespace{
+struct Hello : public FunctionPass {
+  static char ID;
+  Hello() : FunctionPass(ID) {}
+
+  StringRef getPassName() const { return "Hello World Pass";
+  }
+
+  bool runOnFunction(Function &F) override {
+    F.print(llvm::outs());
+    return false;
+  }
+};
+char Hello::ID = 0;
+} // namespace
+namespace {
+struct Hello2 : public FunctionPass {
+  static char ID;
+  Hello2() : FunctionPass(ID) {}
+
+  StringRef getPassName() const { return "Hello World2 Pass"; }
+
+  bool runOnFunction(Function &F) override {
+    F.print(llvm::outs());
+    return false;
+  }
+};
+char Hello2::ID = 1;
+} // namespace
+
+auto createHelloPass() { return new Hello(); }
+auto createHello2Pass() { return new Hello2(); }
+
 static int compileModule(char **argv, LLVMContext &Context) {
   // Load the module to be compiled...
   SMDiagnostic Err;
@@ -644,6 +678,7 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
   // Build up all of the passes that we want to do to the module.
   legacy::PassManager PM;
+  //PM.add(createHelloPass());
 
   // Add an appropriate TargetLibraryInfo pass for the module's triple.
   TargetLibraryInfoImpl TLII(Triple(M->getTargetTriple()));
@@ -746,6 +781,8 @@ static int compileModule(char **argv, LLVMContext &Context) {
       Buffer.clear();
     }
 
+    // 我发现前后两个Hello Pass的IR都是没变的,怀疑在生成汇编阶段还有优化
+    //PM.add(createHello2Pass());
     PM.run(*M);
 
     if (Context.getDiagHandlerPtr()->HasErrors)

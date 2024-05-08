@@ -825,8 +825,8 @@ void PMTopLevelManager::addImmutablePass(ImmutablePass *P) {
 // Print passes managed by this top level manager.
 void PMTopLevelManager::dumpPasses() const {
 
-  //if (PassDebugging < Structure)
-    //return;
+  if (PassDebugging < Structure)
+    return;
 
   // Print out the immutable passes
   for (unsigned i = 0, e = ImmutablePasses.size(); i != e; ++i) {
@@ -1190,8 +1190,8 @@ void PMDataManager::dumpPassArguments() const {
 void PMDataManager::dumpPassInfo(Pass *P, enum PassDebuggingString S1,
                                  enum PassDebuggingString S2,
                                  StringRef Msg) {
-  //if (PassDebugging < Executions)
-  //  return;
+  if (PassDebugging < Executions)
+    return;
   dbgs() << "[" << std::chrono::system_clock::now() << "] " << (void *)this
          << std::string(getDepth() * 2 + 1, ' ');
   switch (S1) {
