@@ -94,6 +94,7 @@
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/IR/InlineAsm.h"
 #include <memory>
 #include <optional>
 using namespace clang;
@@ -818,8 +819,10 @@ public:
     IRBuilder<> Builder(firstBasicBlock);
     ICmpInst *condition;
     condition = new ICmpInst(
-        firstBasicBlock->getTerminator(), ICmpInst::ICMP_EQ,
-        dynamic_cast<llvm::Value*>(ConstantInt::get(llvm::Type::getInt32Ty(F.getParent()->getContext()), 0x11223344,
+        firstBasicBlock->getTerminator(), ICmpInst::ICMP_NE,
+                     dynamic_cast<llvm::Value *>(ConstantInt::get(
+                         llvm::Type::getInt32Ty(F.getParent()->getContext()),
+                         1 /*如果改成0x11223344,就会被直接优化掉,而且不知道是在哪里被优化的*/,
                          false)),
 
 
@@ -835,7 +838,16 @@ public:
     builder.SetInsertPoint(destoryStackBlock);
     // 创建修改大量栈指针的指针
     Value *ArraySize = ConstantInt::get(llvm::Type::getInt32Ty(F.getParent()->getContext()), 100000);
-    builder.CreateAlloca(llvm::Type::getInt32Ty(F.getParent()->getContext()), ArraySize);
+    auto alloc = builder.CreateAlloca(llvm::Type::getInt32Ty(F.getParent()->getContext()), ArraySize);
+    // 不Store的话上面Alloca也直接被优化没
+    // 实际上编译器会生成j__alloca_probe来分配大栈空间,目的是需要直接的sub rsp,xx这种指令
+    //builder.CreateStore(builder.getInt32(0), alloc);
+    std::string asm_str = "sub rsp,0x12345678";
+    llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
+        llvm::FunctionType::get(llvm::Type::getVoidTy(F.getParent()->getContext()), false),
+        asm_str, "",
+        false, false, llvm::InlineAsm::AD_Intel);
+    builder.CreateCall(inlineAsm);
     builder.CreateRetVoid();
     // 创建分支
         BranchInst *newBranch =
