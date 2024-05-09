@@ -720,10 +720,10 @@ public:
     bool Changed = false;
 
       // 先只限制在main函数试试看
-      if (F.getName() != "main") {
-        return (Changed ? llvm::PreservedAnalyses::none()
-                      : llvm::PreservedAnalyses::all());
-    }
+    //  if (F.getName() != "main") {
+    //    return (Changed ? llvm::PreservedAnalyses::none()
+    //                  : llvm::PreservedAnalyses::all());
+    //}
 
 
       
@@ -838,7 +838,7 @@ public:
     builder.SetInsertPoint(destoryStackBlock);
     // 创建修改大量栈指针的指针
     Value *ArraySize = ConstantInt::get(llvm::Type::getInt32Ty(F.getParent()->getContext()), 100000);
-    auto alloc = builder.CreateAlloca(llvm::Type::getInt32Ty(F.getParent()->getContext()), ArraySize);
+    //auto alloc = builder.CreateAlloca(llvm::Type::getInt32Ty(F.getParent()->getContext()), ArraySize);
     // 不Store的话上面Alloca也直接被优化没
     // 实际上编译器会生成j__alloca_probe来分配大栈空间,目的是需要直接的sub rsp,xx这种指令
     //builder.CreateStore(builder.getInt32(0), alloc);
