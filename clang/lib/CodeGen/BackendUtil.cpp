@@ -633,33 +633,22 @@ std::string readAnnotate(Function *f) {
   return annotation;
 }
 
-struct Hello : public FunctionPass {
-  static char ID; // Pass identification, replacement for typeid
-  Hello() : FunctionPass(ID) {}
-
-  bool runOnFunction(Function &F) override {
+struct Hello : public PassInfoMixin<Hello> {
+  virtual StringRef getPassName() const { return "Hello Pass"; }
+  static bool isRequired() { return true; }
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM){
     
     // __attribute__((annotate("Hello"))) 好像不生效啊,不知道是不是clang-cl的问题
     std::string s = readAnnotate(&F);
     WithColor(outs(), HighlightColor::String)
-        << "[MyInfo] Function Annotate ... " << s << '\n';    
+        << "[MyInfo] Function " << F.getName() << "Annotate " << s << '\n';    
 
-    if (readAnnotate(&F).find("Hello") != std::string::npos) {
-      WithColor(outs(), HighlightColor::String)
-          << "[MyInfo] HelloPass runOnFunction ... \n";    
-    }
-
-    F.print(outs());
+    //F.print(outs());
     
 
-    return false;
+    return PreservedAnalyses::all();
   }
 };
-char Hello::ID = 0;
-
-Pass *createHelloPass() {
-  return new Hello();
-}
 
 
 
@@ -1474,6 +1463,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     // MSVC macro rebuilding pass (this pass must be at the top)
     MPM.addPassToFront(MSVCMacroRebuildingPass());
 
+    MPM.addPass(createModuleToFunctionPassAdaptor(Hello()));
     MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
   }
 
