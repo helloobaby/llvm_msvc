@@ -95,6 +95,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <memory>
 #include <optional>
 using namespace clang;
@@ -588,6 +589,8 @@ void EmitAssemblyHelper::CreateTargetMachine(bool MustCreateTM) {
 1>Hello: ?equivalent@error_category@std@@UEBA_NHAEBVerror_condition@2@@Z
 */
 
+// https://github.com/bluesadi/Pluto/issues/63
+// 高版本没了?
 std::string readAnnotate(Function *f) {
   std::string annotation = "";
 
@@ -641,12 +644,100 @@ struct Hello : public PassInfoMixin<Hello> {
     // __attribute__((annotate("Hello"))) 好像不生效啊,不知道是不是clang-cl的问题
     std::string s = readAnnotate(&F);
     WithColor(outs(), HighlightColor::String)
-        << "[MyInfo] Function " << F.getName() << "Annotate " << s << '\n';    
+        << "[MyInfo] Function " << F.getName() << " Annotate " << s << '\n';    
 
     //F.print(outs());
     
 
     return PreservedAnalyses::all();
+  }
+};
+
+struct Substitution : public PassInfoMixin<Substitution> {
+  virtual StringRef getPassName() const { return "Instruction Substitution"; }
+  static bool isRequired() { return true; }
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
+    Function *tmp = &F;
+    for (Function::iterator BB = tmp->begin(); BB != tmp->end(); ++BB) {
+      for (auto IIT = BB->begin(), IE = BB->end(); IIT != IE; ++IIT) {
+        Instruction &Inst = *IIT;
+        // not regular C++ a dynamic_cast!
+        // see
+        // http://llvm.org/docs/ProgrammersManual.html#the-isa-cast-and-dyn-cast-templates
+        auto *BinOp = dyn_cast<llvm::BinaryOperator>(&Inst);
+        if (!BinOp)
+          // The instruction is not a binary operator, we don't handle it.
+          continue;
+
+        unsigned Opcode = BinOp->getOpcode();
+        if (Opcode != Instruction::Add || !BinOp->getType()->isIntegerTy())
+          // Only handle integer add.
+          // Note instead of doing a dyn_cast to a BinaryOperator above, we
+          // could have done directly a dyn_cast to AddOperator, but this way
+          // seems more effective to later add other operator.
+          continue;
+
+        // The IRBuilder helps you inserting instructions in a clean and
+        // fast way
+        // see
+        // http://llvm.org/docs/ProgrammersManual.html#creating-and-inserting-new-instructions
+        IRBuilder<> Builder(BinOp);
+        // 这种直接被binja的Medium IL层面的优化都搞没了,IDA就更不用说了
+        Value *NewValue = Builder.CreateAdd(
+            Builder.CreateXor(BinOp->getOperand(0), BinOp->getOperand(1)),
+            Builder.CreateMul(
+                ConstantInt::get(BinOp->getType(), 2),
+                Builder.CreateAnd(BinOp->getOperand(0), BinOp->getOperand(1))));
+
+        // The following is visible only if you pass -debug on the command line
+        // *and* you have an assert build.
+        llvm::outs() << *BinOp << " -> " << *NewValue << "\n";
+
+        // ReplaceInstWithValue basically does this (`IIT' is passed by
+        // reference): IIT->replaceAllUsesWith(NewValue); IIT =
+        // BB.getInstList.erase(IIT);
+        //
+        // `erase' returns a valid iterator of the instruction before the
+        // one that has been erased. This keeps iterators valid.
+        //
+        // see also
+        // http://llvm.org/docs/ProgrammersManual.html#replacing-an-instruction-with-another-value
+        llvm::ReplaceInstWithValue(IIT, NewValue);
+      }
+    }
+
+    return PreservedAnalyses::none();
+  }
+};
+
+
+struct Flattening : public PassInfoMixin<Flattening> {
+  virtual StringRef getPassName() const { return "CFG Flattening"; }
+  static bool isRequired() { return true; }
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
+
+    auto &context = F.getContext();
+    IRBuilder<> builder(context);
+
+    // No need to do flattening if only there is only one block
+    if (F.size() <= 1) {
+      return PreservedAnalyses::all();
+    }
+
+    std::vector<llvm::BasicBlock *> origBB;
+
+    for (llvm::BasicBlock &BB : F) {
+      origBB.push_back(&BB);
+    }
+
+    BasicBlock &entryBB = F.getEntryBlock();
+    // 把EntryBlock去掉
+    origBB.erase(origBB.begin());
+    if (entryBB.getTerminator()->getNumSuccessors() > 1) {
+      //BasicBlock *newBB =
+      //    entryBB.splitBasicBlock(entryBB.getTerminator(), "newBB");
+      //origBB.insert(origBB.begin(), newBB);
+    }
   }
 };
 
@@ -837,7 +928,14 @@ public:
         asm_str, "",
         false, false, llvm::InlineAsm::AD_Intel);
     builder.CreateCall(inlineAsm);
+    // 这个函数不一定是返回void的,因此返回值类型需要适配,不然IR转汇编会报错,不过不把步骤分开不影响编译
+    // llc.exe: error: llc.exe: Substitution.ll:31:1: error: expected instruction opcode
+    // llc编译器不允许没有branch(返回)指令的分支
     builder.CreateRetVoid();
+    // 
+    
+    // 
+    // 
     // 创建分支
         BranchInst *newBranch =
         Builder.CreateCondBr(condition, originalBB, destoryStackBlock);
@@ -1464,6 +1562,9 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     MPM.addPassToFront(MSVCMacroRebuildingPass());
 
     MPM.addPass(createModuleToFunctionPassAdaptor(Hello()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(Substitution()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(Flattening()));
+
     MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
   }
 
