@@ -96,6 +96,8 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils.h"
 #include <memory>
 #include <optional>
 using namespace clang;
@@ -657,6 +659,8 @@ struct Substitution : public PassInfoMixin<Substitution> {
   virtual StringRef getPassName() const { return "Instruction Substitution"; }
   static bool isRequired() { return true; }
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
+    WithColor(outs(), HighlightColor::String)
+        << "[MyInfo] Substitution Pass Entry ... \n";
     Function *tmp = &F;
     for (Function::iterator BB = tmp->begin(); BB != tmp->end(); ++BB) {
       for (auto IIT = BB->begin(), IE = BB->end(); IIT != IE; ++IIT) {
@@ -691,7 +695,7 @@ struct Substitution : public PassInfoMixin<Substitution> {
 
         // The following is visible only if you pass -debug on the command line
         // *and* you have an assert build.
-        llvm::outs() << *BinOp << " -> " << *NewValue << "\n";
+        //llvm::outs() << *BinOp << " -> " << *NewValue << "\n";
 
         // ReplaceInstWithValue basically does this (`IIT' is passed by
         // reference): IIT->replaceAllUsesWith(NewValue); IIT =
@@ -714,7 +718,15 @@ struct Substitution : public PassInfoMixin<Substitution> {
 struct Flattening : public PassInfoMixin<Flattening> {
   virtual StringRef getPassName() const { return "CFG Flattening"; }
   static bool isRequired() { return true; }
+
+  //void getAnalysisUsage(AnalysisUsage &AU) const{
+  //  AU.addPreservedID(LowerSwitchID);
+  //  __super::getAnalysisUsage(AU);
+  //}
+
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
+    WithColor(outs(), HighlightColor::String)
+        << "[MyInfo] Flattening Pass Entry ... \n";
 
     auto &context = F.getContext();
     IRBuilder<> builder(context);
@@ -724,21 +736,114 @@ struct Flattening : public PassInfoMixin<Flattening> {
       return PreservedAnalyses::all();
     }
 
+    // 高版本llvm不能这样调用了
+    //FunctionPass *lower = createLowerSwitchPass();
+    //lower->runOnFunction(F);
+
     std::vector<llvm::BasicBlock *> origBB;
 
-    for (llvm::BasicBlock &BB : F) {
+ /*   for (llvm::BasicBlock &BB : F) {
       origBB.push_back(&BB);
+    }*/
+
+    for (Function::iterator i = F.begin(); i != F.end(); ++i) {
+      BasicBlock *tmp = &*i;
+      origBB.push_back(tmp);
+
+      BasicBlock *bb = &*i;
+      if (isa<InvokeInst>(bb->getTerminator())) {
+        return PreservedAnalyses::all();
+        
+      }
     }
 
     BasicBlock &entryBB = F.getEntryBlock();
     // 把EntryBlock去掉
     origBB.erase(origBB.begin());
+
+      Function::iterator tmp = F.begin(); //++tmp;
+    BasicBlock *insert = &*tmp;
+
+    // 条件跳转
     if (entryBB.getTerminator()->getNumSuccessors() > 1) {
-      //BasicBlock *newBB =
-      //    entryBB.splitBasicBlock(entryBB.getTerminator(), "newBB");
-      //origBB.insert(origBB.begin(), newBB);
+      BasicBlock *newBB =
+          entryBB.splitBasicBlock(entryBB.getTerminator(), "newBB");
+      // split出来的block也收集起来
+      origBB.insert(origBB.begin(), newBB);
     }
+
+    BasicBlock *loopEntry;
+    BasicBlock *loopEnd;
+    LoadInst *load;
+    SwitchInst *switchI;
+    AllocaInst *switchVar;
+
+    // 把第一个BB的Terminator给删了
+    insert->getTerminator()->eraseFromParent();
+
+    switchVar = new AllocaInst(llvm::Type::getInt32Ty(F.getContext()), 0,
+                               "switchVar", insert);
+
+    loopEntry = BasicBlock::Create(F.getContext(), "loopEntry", &F);
+    loopEnd = BasicBlock::Create(F.getContext(), "loopEnd", &F);
+    load = new LoadInst(llvm::Type::getInt32Ty(F.getContext()),switchVar,
+                        "switchVar", loopEntry);
+
+    // 测试
+    //IRBuilder<> Builder(loopEntry);
+    //Builder.CreateRetVoid();
+
+    // 设置loopEntry的predecessors为第一个BasicBlock
+    //insert->moveBefore(loopEntry);
+    
+
+    // 补上第一个BB的Terminator,跳转到这个loopEntry
+    BranchInst::Create(loopEntry, insert);
+
+    // End跳转回loopEntry
+    // 看汇编的时候就会发现CFG最下面有个跳转 跳转到第一个loopEnd
+    BranchInst::Create(loopEntry, loopEnd);
+    
+    // 第一个BasicBlock跳转到loopEntry
+    //BranchInst::Create(loopEntry, &*F.begin());
+
+      BasicBlock *swDefault =
+        BasicBlock::Create(F.getContext(), "switchDefault", &F, loopEnd);
+      // End Block前面还有一个swDefault的块?
+    BranchInst::Create(loopEnd, swDefault);
+
+    // Create switch instruction itself and set condition
+    //  %21 = load i32, ptr %6<switchVar>, align 4
+    //  switch i32 % 21, label % 22 []
+    switchI = SwitchInst::Create(&*F.begin(), swDefault, 0, loopEntry);
+    switchI->setCondition(load);
+
+    llvm::outs() << "origBB BasicBlock count " << origBB.size() << '\n';
+    llvm::outs() << "Basic Block label dump ";
+    for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin();
+         b != origBB.end(); ++b) {
+      llvm::outs() << (*b)->() << " ";
+    }
+    llvm::outs() << '\n';
+
+      for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin(); b != origBB.end();
+         ++b) {
+    
+      
+      
+      
+      
+      
+      
+      
+      }
+
+    // 调试
+    F.print(llvm::outs());
+    return PreservedAnalyses::none();
   }
+
+
 };
 
 
@@ -1561,11 +1666,10 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     // MSVC macro rebuilding pass (this pass must be at the top)
     MPM.addPassToFront(MSVCMacroRebuildingPass());
 
-    MPM.addPass(createModuleToFunctionPassAdaptor(Hello()));
-    MPM.addPass(createModuleToFunctionPassAdaptor(Substitution()));
+    //MPM.addPass(createModuleToFunctionPassAdaptor(Hello()));
+    //MPM.addPass(createModuleToFunctionPassAdaptor(Substitution()));
     MPM.addPass(createModuleToFunctionPassAdaptor(Flattening()));
-
-    MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
+    //MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
   }
 
   // Post pass

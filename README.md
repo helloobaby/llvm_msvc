@@ -56,3 +56,26 @@ https://maskray.me/blog/2023-09-24-a-deep-dive-into-clang-source-file-compilatio
 
 https://github.com/helloobaby/llvm_tools_examples
 
+
+
+
+
+### How to Use:
+
+(1)Download Release to C:\RelWithDebInfo
+
+(2)VisualStudio Install Standard clang tool chain
+
+https://learn.microsoft.com/en-us/cpp/build/clang-support-msbuild?view=msvc-170
+
+(3)Directory.build.props
+
+```
+<Project>
+  <PropertyGroup>
+    <LLVMInstallDir>C:\RelWithDebInfo</LLVMInstallDir>
+    <LLVMToolsVersion>777</LLVMToolsVersion>
+  </PropertyGroup>
+</Project>
+```
+
