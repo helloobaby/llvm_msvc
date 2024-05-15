@@ -98,8 +98,13 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <memory>
+#include <map>
+#include <cstdint>
 #include <optional>
+#include <filesystem>
+#include <llvm/Demangle/Demangle.h>
 using namespace clang;
 using namespace llvm;
 
@@ -714,6 +719,37 @@ struct Substitution : public PassInfoMixin<Substitution> {
   }
 };
 
+uint64_t generateRandomNumber(uint64_t min, uint64_t max) {
+  std::random_device rd;
+  std::mt19937_64 gen(rd());
+  std::uniform_int_distribution<uint64_t> dis(min, max);
+  return dis(gen);
+}
+void fixStack(Function &F) {
+  std::vector<llvm::PHINode *> origPHI;
+  std::vector<llvm::Instruction *> origReg;
+  do {
+    origPHI.clear();
+    origReg.clear();
+    BasicBlock &entryBB = F.getEntryBlock();
+    for (BasicBlock &BB : F) {
+      for (Instruction &I : BB) {
+        if (PHINode *PN = dyn_cast<PHINode>(&I)) {
+          origPHI.push_back(PN);
+        } else if (!(isa<AllocaInst>(&I) && I.getParent() == &entryBB) &&
+                   I.isUsedOutsideOfBlock(&BB)) {
+          origReg.push_back(&I);
+        }
+      }
+    }
+    for (PHINode *PN : origPHI) {
+      DemotePHIToStack(PN, entryBB.getTerminator());
+    }
+    for (Instruction *I : origReg) {
+      DemoteRegToStack(*I, entryBB.getTerminator());
+    }
+  } while (!origPHI.empty() || !origReg.empty());
+}
 
 struct Flattening : public PassInfoMixin<Flattening> {
   virtual StringRef getPassName() const { return "CFG Flattening"; }
@@ -725,8 +761,17 @@ struct Flattening : public PassInfoMixin<Flattening> {
   //}
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
-    WithColor(outs(), HighlightColor::String)
-        << "[MyInfo] Flattening Pass Entry ... \n";
+
+    std::error_code e;
+    std::filesystem::create_directory("builddbg");
+    std::string fileName = std::string("builddbg/Flattening_") +
+                           demangle(F.getName()) + "_Before.txt";
+    auto outs = llvm::raw_fd_ostream(fileName, e);
+    llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e)
+        << "Flattening Pass Entry ... ";
+
+     F.print(outs); 
+    
 
     auto &context = F.getContext();
     IRBuilder<> builder(context);
@@ -737,14 +782,14 @@ struct Flattening : public PassInfoMixin<Flattening> {
     }
 
     // 高版本llvm不能这样调用了
-    //FunctionPass *lower = createLowerSwitchPass();
-    //lower->runOnFunction(F);
+    // FunctionPass *lower = createLowerSwitchPass();
+    // lower->runOnFunction(F);
 
     std::vector<llvm::BasicBlock *> origBB;
 
- /*   for (llvm::BasicBlock &BB : F) {
-      origBB.push_back(&BB);
-    }*/
+    /*   for (llvm::BasicBlock &BB : F) {
+         origBB.push_back(&BB);
+       }*/
 
     for (Function::iterator i = F.begin(); i != F.end(); ++i) {
       BasicBlock *tmp = &*i;
@@ -753,7 +798,6 @@ struct Flattening : public PassInfoMixin<Flattening> {
       BasicBlock *bb = &*i;
       if (isa<InvokeInst>(bb->getTerminator())) {
         return PreservedAnalyses::all();
-        
       }
     }
 
@@ -761,7 +805,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
     // 把EntryBlock去掉
     origBB.erase(origBB.begin());
 
-      Function::iterator tmp = F.begin(); //++tmp;
+    Function::iterator tmp = F.begin(); //++tmp;
     BasicBlock *insert = &*tmp;
 
     // 条件跳转
@@ -770,6 +814,13 @@ struct Flattening : public PassInfoMixin<Flattening> {
           entryBB.splitBasicBlock(entryBB.getTerminator(), "newBB");
       // split出来的block也收集起来
       origBB.insert(origBB.begin(), newBB);
+    }
+
+        // 每个真实的BasicBlock对应一个ID
+    std::unordered_map<llvm::BasicBlock *, uint64_t> bbmap;
+    for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin();
+         b != origBB.end(); ++b) {
+      bbmap[*b] = generateRandomNumber(0, -1);
     }
 
     BasicBlock *loopEntry;
@@ -781,21 +832,25 @@ struct Flattening : public PassInfoMixin<Flattening> {
     // 把第一个BB的Terminator给删了
     insert->getTerminator()->eraseFromParent();
 
-    switchVar = new AllocaInst(llvm::Type::getInt32Ty(F.getContext()), 0,
+    switchVar = new AllocaInst(llvm::Type::getInt64Ty(F.getContext()), 0,
                                "switchVar", insert);
+
+    // 这个switchVar肯定要有个默认值的,选第一BasicBlock的StateVar?
+    new StoreInst(ConstantInt::get(llvm::Type::getInt64Ty(F.getContext()),
+                                   APInt(64, bbmap.find(origBB[0])->second)),
+        switchVar, insert);
 
     loopEntry = BasicBlock::Create(F.getContext(), "loopEntry", &F);
     loopEnd = BasicBlock::Create(F.getContext(), "loopEnd", &F);
-    load = new LoadInst(llvm::Type::getInt32Ty(F.getContext()),switchVar,
+    load = new LoadInst(llvm::Type::getInt64Ty(F.getContext()), switchVar,
                         "switchVar", loopEntry);
 
     // 测试
-    //IRBuilder<> Builder(loopEntry);
-    //Builder.CreateRetVoid();
+    // IRBuilder<> Builder(loopEntry);
+    // Builder.CreateRetVoid();
 
     // 设置loopEntry的predecessors为第一个BasicBlock
-    //insert->moveBefore(loopEntry);
-    
+    // insert->moveBefore(loopEntry);
 
     // 补上第一个BB的Terminator,跳转到这个loopEntry
     BranchInst::Create(loopEntry, insert);
@@ -803,43 +858,109 @@ struct Flattening : public PassInfoMixin<Flattening> {
     // End跳转回loopEntry
     // 看汇编的时候就会发现CFG最下面有个跳转 跳转到第一个loopEnd
     BranchInst::Create(loopEntry, loopEnd);
-    
+
     // 第一个BasicBlock跳转到loopEntry
-    //BranchInst::Create(loopEntry, &*F.begin());
+    // BranchInst::Create(loopEntry, &*F.begin());
 
-      BasicBlock *swDefault =
+    BasicBlock *swDefault =
         BasicBlock::Create(F.getContext(), "switchDefault", &F, loopEnd);
-      // End Block前面还有一个swDefault的块?
+    // End Block前面还有一个swDefault的块?
     BranchInst::Create(loopEnd, swDefault);
-
+    
     // Create switch instruction itself and set condition
     //  %21 = load i32, ptr %6<switchVar>, align 4
     //  switch i32 % 21, label % 22 []
     switchI = SwitchInst::Create(&*F.begin(), swDefault, 0, loopEntry);
     switchI->setCondition(load);
 
-    llvm::outs() << "origBB BasicBlock count " << origBB.size() << '\n';
-    llvm::outs() << "Basic Block label dump ";
+    //llvm::outs() << "origBB BasicBlock count " << origBB.size() << '\n';
+
+      // Put all BB in the switch
+    for (std::vector<BasicBlock *>::iterator b = origBB.begin(); b != origBB.end();
+         ++b) {
+      BasicBlock *i = *b;
+      ConstantInt *numCase = NULL;
+
+      // Move the BB inside the switch (only visual, no code logic)
+      //i->moveBefore(loopEnd);
+
+      // Add case to switch
+      auto keyTrue = bbmap.find(*b)->second;
+      numCase = cast<ConstantInt>(ConstantInt::get(
+          switchI->getCondition()->getType(), APInt(64, keyTrue)));
+      switchI->addCase(numCase, i);
+    }
+
+    // 再add一个DestroyStack的BasicBlock
+    BasicBlock *destoryStackBlock =
+        BasicBlock::Create(F.getContext(), "DestroyStack", &F);
+    builder = destoryStackBlock;
+    builder.SetInsertPoint(destoryStackBlock);
+    std::string asm_str = "sub rsp,0x1234567887654321";
+    llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
+        llvm::FunctionType::get(
+            llvm::Type::getVoidTy(F.getParent()->getContext()), false),
+        asm_str, "", false, false, llvm::InlineAsm::AD_Intel);
+    builder.CreateCall(inlineAsm);
+    builder.CreateRetVoid();
+
+    switchI->addCase(
+        cast<ConstantInt>(ConstantInt::get(switchI->getCondition()->getType(),
+                                           APInt(64, 0x1234567887654321))),
+        destoryStackBlock);
+
     for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin();
          b != origBB.end(); ++b) {
-      llvm::outs() << (*b)->() << " ";
-    }
-    llvm::outs() << '\n';
+      BasicBlock *i = *b;
+      ConstantInt *numCase = NULL;
 
-      for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin(); b != origBB.end();
-         ++b) {
-    
-      
-      
-      
-      
-      
-      
-      
+      if (i->getTerminator()->getNumSuccessors() == 0) {
+        continue;
       }
 
-    // 调试
-    F.print(llvm::outs());
+      // 条件分支
+      if (i->getTerminator()->getNumSuccessors() == 2) {
+        auto bbTrue = i->getTerminator()->getSuccessor(0);
+        auto bbFalse = i->getTerminator()->getSuccessor(1);
+
+        auto keyTrue = bbmap.find(bbTrue)->second;
+        auto keyFalse = bbmap.find(bbFalse)->second;
+
+        auto numCaseTrue = cast<ConstantInt>(ConstantInt::get(
+            switchI->getCondition()->getType(), APInt(64, keyTrue)));
+
+        auto numCaseFalse = cast<ConstantInt>(ConstantInt::get(
+            switchI->getCondition()->getType(), APInt(64, keyFalse)));
+
+        BranchInst *br = cast<BranchInst>(i->getTerminator());
+        // 他这个其实是根据上一个分支的condition来决定下一个State
+        SelectInst *sel =
+            SelectInst::Create(br->getCondition(), numCaseTrue, numCaseFalse,
+                               "", i->getTerminator());
+
+        i->getTerminator()->eraseFromParent();
+        new StoreInst(sel, load->getPointerOperand(), i);
+        BranchInst::Create(loopEnd, i);
+        continue;
+      }
+
+      if (i->getTerminator()->getNumSuccessors() == 1) {
+        BasicBlock *succ = i->getTerminator()->getSuccessor(0);
+        i->getTerminator()->eraseFromParent();
+
+        auto keySucc = bbmap.find(succ)->second;
+        numCase = cast<ConstantInt>(
+            ConstantInt::get(switchI->getCondition()->getType(), keySucc));
+
+        new StoreInst(numCase, load->getPointerOperand(), i);
+        BranchInst::Create(loopEnd, i);
+        continue;
+      }
+    }
+    fixStack(F);
+    fileName = std::string("builddbg/Flattening_") + demangle(F.getName()) + "_After.txt";
+    auto outs2 = llvm::raw_fd_ostream(fileName, e);
+    F.print(outs2);
     return PreservedAnalyses::none();
   }
 
