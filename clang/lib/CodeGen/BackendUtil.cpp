@@ -894,9 +894,8 @@ struct Flattening : public PassInfoMixin<Flattening> {
     // 再add一个DestroyStack的BasicBlock
     BasicBlock *destoryStackBlock =
         BasicBlock::Create(F.getContext(), "DestroyStack", &F);
-    builder = destoryStackBlock;
     builder.SetInsertPoint(destoryStackBlock);
-    std::string asm_str = "sub rsp,0x1234567887654321";
+    std::string asm_str = "sub rsp,0x12345678";
     llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
         llvm::FunctionType::get(
             llvm::Type::getVoidTy(F.getParent()->getContext()), false),
