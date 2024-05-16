@@ -789,28 +789,20 @@ struct Flattening : public PassInfoMixin<Flattening> {
     }
     std::vector<llvm::BasicBlock *> origBB;
 
-    /*   for (llvm::BasicBlock &BB : F) {
-         origBB.push_back(&BB);
-       }*/
-
     for (Function::iterator i = F.begin(); i != F.end(); ++i) {
       BasicBlock *tmp = &*i;
       origBB.push_back(tmp);
-
-      BasicBlock *bb = &*i;
-      if (isa<InvokeInst>(bb->getTerminator())) {
-        return PreservedAnalyses::all();
-      }
     }
 
     BasicBlock &entryBB = F.getEntryBlock();
+
     // 把EntryBlock去掉
     origBB.erase(origBB.begin());
 
     Function::iterator tmp = F.begin(); //++tmp;
     BasicBlock *insert = &*tmp;
 
-    // 入口BasicBlock条件跳转
+    // EntryBlock是有分支的
     if (entryBB.getTerminator()->getNumSuccessors() > 1) {
       BasicBlock *newBB =
           entryBB.splitBasicBlock(entryBB.getTerminator(), "newBB");
@@ -818,7 +810,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
       origBB.insert(origBB.begin(), newBB);
     }
 
-        // 每个真实的BasicBlock对应一个ID
+    // 每个真实的BasicBlock生成一个随机的64位的ID
     std::unordered_map<llvm::BasicBlock *, uint64_t> bbmap;
     for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin();
          b != origBB.end(); ++b) {
@@ -831,13 +823,17 @@ struct Flattening : public PassInfoMixin<Flattening> {
     SwitchInst *switchI;
     AllocaInst *switchVar;
 
-    // 把第一个BB的Terminator给删了
-    insert->getTerminator()->eraseFromParent();
+    // Invoke好像不能动啊
+    if (isa<InvokeInst>(insert->getTerminator())) {
+
+    } else {
+        insert->getTerminator()->eraseFromParent();
+    }
 
     switchVar = new AllocaInst(llvm::Type::getInt64Ty(F.getContext()), 0,
                                "switchVar", insert);
 
-    // 这个switchVar肯定要有个默认值的,选第一BasicBlock的StateVar?
+    // 这个switchVar肯定要有个默认值的,选第一BasicBlock的StateVar
     new StoreInst(ConstantInt::get(llvm::Type::getInt64Ty(F.getContext()),
                                    APInt(64, bbmap.find(origBB[0])->second)),
         switchVar, insert);
@@ -847,35 +843,22 @@ struct Flattening : public PassInfoMixin<Flattening> {
     load = new LoadInst(llvm::Type::getInt64Ty(F.getContext()), switchVar,
                         "switchVar", loopEntry);
 
-    // 测试
-    // IRBuilder<> Builder(loopEntry);
-    // Builder.CreateRetVoid();
-
-    // 设置loopEntry的predecessors为第一个BasicBlock
-    // insert->moveBefore(loopEntry);
-
     // 补上第一个BB的Terminator,跳转到这个loopEntry
-    BranchInst::Create(loopEntry, insert);
+    if (!isa<InvokeInst>(insert->getTerminator())) {
+      BranchInst::Create(loopEntry, insert);
+    }
 
     // End跳转回loopEntry
-    // 看汇编的时候就会发现CFG最下面有个跳转 跳转到第一个loopEnd
     BranchInst::Create(loopEntry, loopEnd);
-
-    // 第一个BasicBlock跳转到loopEntry
-    // BranchInst::Create(loopEntry, &*F.begin());
 
     BasicBlock *swDefault =
         BasicBlock::Create(F.getContext(), "switchDefault", &F, loopEnd);
-    // End Block前面还有一个swDefault的块?
+    // loopEnd->swDefault
     BranchInst::Create(loopEnd, swDefault);
     
-    // Create switch instruction itself and set condition
-    //  %21 = load i32, ptr %6<switchVar>, align 4
-    //  switch i32 % 21, label % 22 []
+    // 创建Switch大循环
     switchI = SwitchInst::Create(&*F.begin(), swDefault, 0, loopEntry);
     switchI->setCondition(load);
-
-    //llvm::outs() << "origBB BasicBlock count " << origBB.size() << '\n';
 
       // Put all BB in the switch
     for (std::vector<BasicBlock *>::iterator b = origBB.begin(); b != origBB.end();
@@ -898,7 +881,9 @@ struct Flattening : public PassInfoMixin<Flattening> {
       switchI->addCase(numCase, i);
     }
 
-    // 再add一个DestroyStack的BasicBlock
+
+
+    // 再add一个DestroyStack的BasicBlock,用来干扰IDA的F5
     if (canLog) {
       llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
                            llvm::sys::fs::OpenFlags::OF_Append)
@@ -919,6 +904,10 @@ struct Flattening : public PassInfoMixin<Flattening> {
         cast<ConstantInt>(ConstantInt::get(switchI->getCondition()->getType(),
                                            APInt(64, 0x1234567887654321))),
         destoryStackBlock);
+
+
+
+
 
     for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin();
          b != origBB.end(); ++b) {
@@ -969,10 +958,14 @@ struct Flattening : public PassInfoMixin<Flattening> {
       }
     }
     fixStack(F);
+
+
     llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
                          llvm::sys::fs::OpenFlags::OF_Append)
         << "Flattening Done" << '\n';
 
+    // 断点调试
+    F.print(llvm::outs());
     return PreservedAnalyses::none();
   }
 
