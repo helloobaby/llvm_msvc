@@ -895,7 +895,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
     BasicBlock *destoryStackBlock =
         BasicBlock::Create(F.getContext(), "DestroyStack", &F);
     builder.SetInsertPoint(destoryStackBlock);
-    std::string asm_str = "sub rsp,0x12345678";
+    std::string asm_str = "sub rsp,0x13371337";
     llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
         llvm::FunctionType::get(
             llvm::Type::getVoidTy(F.getParent()->getContext()), false),
@@ -1791,9 +1791,6 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
 
   // Post pass
   {
-    // Welcome to llvm-msvc pass
-    MPM.addPass(WelcomeToLLVMMSVCPass(true));
-    //MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
     // IR auto generator pass(Post)
     MPM.addPass(IRAutoGeneratorPostPass(CodeGenOpts.AutoGenerateIR,
                                           "IRAutoGeneratorPost"));
@@ -1867,19 +1864,6 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     PrettyStackTraceString CrashInfo("Optimizer");
     llvm::TimeTraceScope TimeScope("Optimizer");
     // https://llvm.org/docs/NewPassManager.html#just-tell-me-how-to-run-the-default-optimization-pipeline-with-the-new-pass-manager
-    
-
-
-        WithColor(outs(), HighlightColor::String)
-        << "[MyInfo] Print All passes ... \n";
-    MPM.printPipeline(outs(), [&PIC](StringRef ClassName) {
-      auto PassName = PIC.getPassNameForClassName(ClassName);
-      return PassName.empty() ? ClassName : PassName;
-    });
-    outs() << "\n";
-    //https://llvm.org/docs/NewPassManager.html#id3
-    // 这样写的话应该是对模块内的每一个函数运行DestoryStack这个Pass
-    //MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
     
     MPM.run(*TheModule, MAM);
   }
@@ -2129,11 +2113,12 @@ void clang::EmitBackendOutput(
     }
   }
     
-  WithColor(outs(), HighlightColor::String)
-      << "[MyInfo] Module Print start... \n";
-  M->print(llvm::outs(), nullptr);
-  WithColor(outs(), HighlightColor::String)
-      << "[MyInfo] Module Print end ... \n";
+  std::error_code e;
+  std::filesystem::path path = M->getName().str();
+  std::string fileName =
+      std::string("builddbg/Module_") + path.filename().string() + ".txt";
+  auto outs = llvm::raw_fd_ostream(fileName, e);
+  M->print(outs, nullptr);
 }
 
 // With -fembed-bitcode, save a copy of the llvm IR as data in the
