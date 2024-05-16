@@ -1786,10 +1786,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     // MSVC macro rebuilding pass (this pass must be at the top)
     MPM.addPassToFront(MSVCMacroRebuildingPass());
 
-    //MPM.addPass(createModuleToFunctionPassAdaptor(Hello()));
-    //MPM.addPass(createModuleToFunctionPassAdaptor(Substitution()));
     MPM.addPass(createModuleToFunctionPassAdaptor(Flattening()));
-    //MPM.addPass(createModuleToFunctionPassAdaptor(DestoryStack()));
   }
 
   // Post pass
