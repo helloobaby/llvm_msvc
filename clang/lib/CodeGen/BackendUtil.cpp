@@ -763,15 +763,18 @@ struct Flattening : public PassInfoMixin<Flattening> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
 
     std::error_code e;
-    std::filesystem::create_directory("builddbg");
-    std::string fileName = std::string("builddbg/Flattening_") +
-                           demangle(F.getName()) + "_Before.txt";
-    auto outs = llvm::raw_fd_ostream(fileName, e);
-    llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e)
-        << "Flattening Pass Entry ... ";
+    bool canLog = std::filesystem::create_directory("builddbg");
 
-     F.print(outs); 
-    
+    if (canLog) {
+
+      std::string fileName = std::string("builddbg/Flattening_") +
+                             demangle(F.getName()) + "_Before.txt";
+      auto outs = llvm::raw_fd_ostream(fileName, e);
+      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e)
+          << "Flattening Pass Entry ... ";
+
+      F.print(outs);
+    }
 
     auto &context = F.getContext();
     IRBuilder<> builder(context);
@@ -957,9 +960,13 @@ struct Flattening : public PassInfoMixin<Flattening> {
       }
     }
     fixStack(F);
-    fileName = std::string("builddbg/Flattening_") + demangle(F.getName()) + "_After.txt";
-    auto outs2 = llvm::raw_fd_ostream(fileName, e);
-    F.print(outs2);
+    if (canLog) {
+
+      std::string fileName = std::string("builddbg/Flattening_") +
+                             demangle(F.getName()) + "_After.txt";
+      auto outs2 = llvm::raw_fd_ostream(fileName, e);
+      F.print(outs2);
+    }
     return PreservedAnalyses::none();
   }
 
