@@ -103,6 +103,7 @@
 #include <map>
 #include <cstdint>
 #include <optional>
+#include <regex>
 #include <filesystem>
 #include <llvm/Demangle/Demangle.h>
 using namespace clang;
@@ -764,16 +765,12 @@ struct Flattening : public PassInfoMixin<Flattening> {
 
     std::error_code e;
     bool canLog = std::filesystem::create_directory("builddbg");
-
+    canLog |= std::filesystem::exists("builddbg");
     if (canLog) {
 
-      std::string fileName = std::string("builddbg/Flattening_") +
-                             demangle(F.getName()) + "_Before.txt";
-      auto outs = llvm::raw_fd_ostream(fileName, e);
-      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e)
-          << "Flattening Pass Entry ... ";
-
-      F.print(outs);
+      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
+                           llvm::sys::fs::OpenFlags::OF_Append)
+          << "Flattening Obf Funtion " << F.getName() << '\n';
     }
 
     auto &context = F.getContext();
@@ -784,10 +781,12 @@ struct Flattening : public PassInfoMixin<Flattening> {
       return PreservedAnalyses::all();
     }
 
-    // 高版本llvm不能这样调用了
-    // FunctionPass *lower = createLowerSwitchPass();
-    // lower->runOnFunction(F);
+    if (canLog) {
 
+      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
+                           llvm::sys::fs::OpenFlags::OF_Append)
+          << "Function size " << F.size() << '\n';
+    }
     std::vector<llvm::BasicBlock *> origBB;
 
     /*   for (llvm::BasicBlock &BB : F) {
@@ -811,7 +810,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
     Function::iterator tmp = F.begin(); //++tmp;
     BasicBlock *insert = &*tmp;
 
-    // 条件跳转
+    // 入口BasicBlock条件跳转
     if (entryBB.getTerminator()->getNumSuccessors() > 1) {
       BasicBlock *newBB =
           entryBB.splitBasicBlock(entryBB.getTerminator(), "newBB");
@@ -889,12 +888,22 @@ struct Flattening : public PassInfoMixin<Flattening> {
 
       // Add case to switch
       auto keyTrue = bbmap.find(*b)->second;
+      if (canLog) {
+        llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
+                             llvm::sys::fs::OpenFlags::OF_Append)
+            << "Add Case " << keyTrue << '\n';
+      }
       numCase = cast<ConstantInt>(ConstantInt::get(
           switchI->getCondition()->getType(), APInt(64, keyTrue)));
       switchI->addCase(numCase, i);
     }
 
     // 再add一个DestroyStack的BasicBlock
+    if (canLog) {
+      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
+                           llvm::sys::fs::OpenFlags::OF_Append)
+          << "Add unreachable DestroyStack BasicBlock" << '\n';
+    }
     BasicBlock *destoryStackBlock =
         BasicBlock::Create(F.getContext(), "DestroyStack", &F);
     builder.SetInsertPoint(destoryStackBlock);
@@ -960,13 +969,10 @@ struct Flattening : public PassInfoMixin<Flattening> {
       }
     }
     fixStack(F);
-    if (canLog) {
+    llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
+                         llvm::sys::fs::OpenFlags::OF_Append)
+        << "Flattening Done" << '\n';
 
-      std::string fileName = std::string("builddbg/Flattening_") +
-                             demangle(F.getName()) + "_After.txt";
-      auto outs2 = llvm::raw_fd_ostream(fileName, e);
-      F.print(outs2);
-    }
     return PreservedAnalyses::none();
   }
 
@@ -1149,7 +1155,7 @@ public:
     IRBuilder<> builder(destoryStackBlock);
     builder.SetInsertPoint(destoryStackBlock);
     // 创建修改大量栈指针的指针
-    Value *ArraySize = ConstantInt::get(llvm::Type::getInt32Ty(F.getParent()->getContext()), 100000);
+    //Value *ArraySize = ConstantInt::get(llvm::Type::getInt32Ty(F.getParent()->getContext()), 100000);
     //auto alloc = builder.CreateAlloca(llvm::Type::getInt32Ty(F.getParent()->getContext()), ArraySize);
     // 不Store的话上面Alloca也直接被优化没
     // 实际上编译器会生成j__alloca_probe来分配大栈空间,目的是需要直接的sub rsp,xx这种指令
@@ -1169,8 +1175,8 @@ public:
     // 
     // 
     // 创建分支
-        BranchInst *newBranch =
-        Builder.CreateCondBr(condition, originalBB, destoryStackBlock);
+        //BranchInst *newBranch =
+        //Builder.CreateCondBr(condition, originalBB, destoryStackBlock);
 
         
 
@@ -2122,10 +2128,14 @@ void clang::EmitBackendOutput(
     
   std::error_code e;
   std::filesystem::path path = M->getName().str();
+  bool canLog = std::filesystem::create_directory("builddbg");
+  canLog |= std::filesystem::exists("builddbg");
   std::string fileName =
       std::string("builddbg/Module_") + path.filename().string() + ".txt";
+  if (canLog) {  
   auto outs = llvm::raw_fd_ostream(fileName, e);
   M->print(outs, nullptr);
+}
 }
 
 // With -fembed-bitcode, save a copy of the llvm IR as data in the
