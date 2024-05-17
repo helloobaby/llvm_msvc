@@ -2071,12 +2071,7 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
   CoroPM.addPass(CoroCleanupPass());
   CoroPM.addPass(GlobalDCEPass());
 
-  // 这里加Pass不执行
-  //CoroPM.addPass(DCEPassTest());
   MPM.addPass(CoroConditionalWrapper(std::move(CoroPM)));
-
-  // 这里加Pass不执行
-  //MPM.addPass(DCEPassTest());
 
   invokeOptimizerLastEPCallbacks(MPM, Level);
 

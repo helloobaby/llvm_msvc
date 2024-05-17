@@ -99,6 +99,8 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include "llvm/Transforms/Utils/LowerSwitch.h"
+#include "llvm/Transforms/Scalar/Reg2Mem.h"
 #include <memory>
 #include <map>
 #include <cstdint>
@@ -726,51 +728,90 @@ uint64_t generateRandomNumber(uint64_t min, uint64_t max) {
   std::uniform_int_distribution<uint64_t> dis(min, max);
   return dis(gen);
 }
+bool valueEscapes(Instruction *inst) {
+  BasicBlock *bb = inst->getParent();
+  for (auto &u : inst->uses()) {
+    const Instruction *xrefInst = cast<Instruction>(u.getUser());
+    const PHINode *PN = dyn_cast<PHINode>(xrefInst);
+    if (!PN) {
+      if (xrefInst->getParent() != bb) {
+        if (isa<InvokeInst>(inst) && isa<StoreInst>(xrefInst)) {
+          auto invokeInst = dyn_cast<InvokeInst>(inst);
+          auto normalDest = invokeInst->getNormalDest();
+          auto storeInst = dyn_cast<StoreInst>(xrefInst);
+          auto storeTarget = storeInst->getOperand(1);
+          if (storeInst->getParent() == normalDest &&
+              isa<AllocaInst>(storeTarget)) {
+            continue;
+          }
+        }
+        return true;
+      }
+      continue;
+    }
+
+    if (PN->getIncomingBlock(u) != bb) {
+      return true;
+    }
+  }
+  return false;
+}
 void fixStack(Function &F) {
-  std::vector<llvm::PHINode *> origPHI;
-  std::vector<llvm::Instruction *> origReg;
+  std::vector<PHINode *> tmpPhi;
+  std::vector<Instruction *> tmpReg;
+  BasicBlock *bbEntry = &*F.begin();
+
   do {
-    origPHI.clear();
-    origReg.clear();
-    BasicBlock &entryBB = F.getEntryBlock();
-    for (BasicBlock &BB : F) {
-      for (Instruction &I : BB) {
-        if (PHINode *PN = dyn_cast<PHINode>(&I)) {
-          origPHI.push_back(PN);
-        } else if (!(isa<AllocaInst>(&I) && I.getParent() == &entryBB) &&
-                   I.isUsedOutsideOfBlock(&BB)) {
-          origReg.push_back(&I);
+    tmpPhi.clear();
+    tmpReg.clear();
+    for (BasicBlock &bb : F) {
+      for (Instruction &inst : bb) {
+        if (isa<PHINode>(&inst)) {
+          PHINode *phi = dyn_cast<PHINode>(&inst);
+          tmpPhi.push_back(phi);
+          continue;
+        }
+        if (!(isa<AllocaInst>(inst) && inst.getParent() == bbEntry) &&
+            valueEscapes(&inst)) {
+          tmpReg.push_back(&inst);
+          continue;
         }
       }
     }
-    for (PHINode *PN : origPHI) {
-      DemotePHIToStack(PN, entryBB.getTerminator());
+    for (auto i : tmpReg) {
+      DemoteRegToStack(*i, bbEntry->getTerminator());
     }
-    for (Instruction *I : origReg) {
-      DemoteRegToStack(*I, entryBB.getTerminator());
+    for (auto i : tmpPhi) {
+      DemotePHIToStack(i, bbEntry->getTerminator());
     }
-  } while (!origPHI.empty() || !origReg.empty());
+  } while (tmpReg.size() != 0 || tmpPhi.size() != 0);
 }
 
 struct Flattening : public PassInfoMixin<Flattening> {
   virtual StringRef getPassName() const { return "CFG Flattening"; }
   static bool isRequired() { return true; }
 
-  //void getAnalysisUsage(AnalysisUsage &AU) const{
-  //  AU.addPreservedID(LowerSwitchID);
-  //  __super::getAnalysisUsage(AU);
-  //}
-
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM) {
 
     std::error_code e;
     bool canLog = std::filesystem::create_directory("builddbg");
     canLog |= std::filesystem::exists("builddbg");
-    if (canLog) {
+    llvm::raw_fd_ostream outs = llvm::raw_fd_ostream(
+        "builddbg/FlatteningPass.txt", e, llvm::sys::fs::OpenFlags::OF_Append);
+    llvm::raw_fd_ostream outs_ir =
+        llvm::raw_fd_ostream("builddbg/FlatteningIrDumpBefore.txt", e,
+                             llvm::sys::fs::OpenFlags::OF_Append);
 
-      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
-                           llvm::sys::fs::OpenFlags::OF_Append)
-          << "Flattening Obf Funtion " << F.getName() << '\n';
+    llvm::raw_fd_ostream outs_ir_after =
+        llvm::raw_fd_ostream("builddbg/FlatteningIrDumpAfter.txt", e,
+                             llvm::sys::fs::OpenFlags::OF_Append);
+    if (canLog) {
+      outs << "Flattening Obf Funtion " << F.getName() << '\n';
+      F.print(outs_ir);
+      outs_ir << '\n';
+      outs_ir << '\n';
+      outs_ir << '\n';
+      outs_ir << '\n';
     }
 
     auto &context = F.getContext();
@@ -778,15 +819,12 @@ struct Flattening : public PassInfoMixin<Flattening> {
 
     // No need to do flattening if only there is only one block
     if (F.size() <= 1) {
+      if (canLog) {
+        outs << "Function Size less 1" << '\n';
+      }
       return PreservedAnalyses::all();
     }
 
-    if (canLog) {
-
-      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
-                           llvm::sys::fs::OpenFlags::OF_Append)
-          << "Function size " << F.size() << '\n';
-    }
     std::vector<llvm::BasicBlock *> origBB;
 
     for (Function::iterator i = F.begin(); i != F.end(); ++i) {
@@ -802,7 +840,16 @@ struct Flattening : public PassInfoMixin<Flattening> {
     Function::iterator tmp = F.begin(); //++tmp;
     BasicBlock *insert = &*tmp;
 
-    // EntryBlock是有分支的
+    // Terminator一般都是Br,少数情况下是Invoke,Switch的话前一个Pass已经消除了
+    if (canLog) {
+      auto outs = llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
+                                       llvm::sys::fs::OpenFlags::OF_Append);
+      outs << "Print Terminator \n";
+      insert->getTerminator()->print(outs);
+      outs << '\n';
+    }
+
+    // EntryBlock是有2个分支的,把它直接Patch到Switch的loopEntry肯定不对,所以这里先Split一下
     if (entryBB.getTerminator()->getNumSuccessors() > 1) {
       BasicBlock *newBB =
           entryBB.splitBasicBlock(entryBB.getTerminator(), "newBB");
@@ -823,30 +870,23 @@ struct Flattening : public PassInfoMixin<Flattening> {
     SwitchInst *switchI;
     AllocaInst *switchVar;
 
-    // Invoke好像不能动啊
-    if (isa<InvokeInst>(insert->getTerminator())) {
-
-    } else {
-        insert->getTerminator()->eraseFromParent();
-    }
+    insert->getTerminator()->eraseFromParent();
 
     switchVar = new AllocaInst(llvm::Type::getInt64Ty(F.getContext()), 0,
                                "switchVar", insert);
 
-    // 这个switchVar肯定要有个默认值的,选第一BasicBlock的StateVar
+    // 这个switchVar肯定要有个默认值的,选第一个BasicBlock的StateVar
     new StoreInst(ConstantInt::get(llvm::Type::getInt64Ty(F.getContext()),
                                    APInt(64, bbmap.find(origBB[0])->second)),
-        switchVar, insert);
+                  switchVar, insert);
 
     loopEntry = BasicBlock::Create(F.getContext(), "loopEntry", &F);
     loopEnd = BasicBlock::Create(F.getContext(), "loopEnd", &F);
     load = new LoadInst(llvm::Type::getInt64Ty(F.getContext()), switchVar,
                         "switchVar", loopEntry);
 
-    // 补上第一个BB的Terminator,跳转到这个loopEntry
-    if (!isa<InvokeInst>(insert->getTerminator())) {
-      BranchInst::Create(loopEntry, insert);
-    }
+    // 补上第一个BB的Terminator,跳转到这个Switch的loopEntry
+    BranchInst::Create(loopEntry, insert);
 
     // End跳转回loopEntry
     BranchInst::Create(loopEntry, loopEnd);
@@ -855,70 +895,93 @@ struct Flattening : public PassInfoMixin<Flattening> {
         BasicBlock::Create(F.getContext(), "switchDefault", &F, loopEnd);
     // loopEnd->swDefault
     BranchInst::Create(loopEnd, swDefault);
-    
+
     // 创建Switch大循环
     switchI = SwitchInst::Create(&*F.begin(), swDefault, 0, loopEntry);
     switchI->setCondition(load);
 
-      // Put all BB in the switch
-    for (std::vector<BasicBlock *>::iterator b = origBB.begin(); b != origBB.end();
-         ++b) {
+    std::vector<BasicBlock *> unwindBlock;
+    for (std::vector<BasicBlock *>::iterator b = origBB.begin();
+         b != origBB.end(); ++b) {
+      if (isa<InvokeInst>((*b)->getTerminator())) {
+        // unwind块不能加到case里的
+        InvokeInst *Invoke = cast<InvokeInst>((*b)->getTerminator());
+        unwindBlock.push_back(Invoke->getUnwindDest());
+      }
+    }
+
+    outs << "unwindBlock size " << unwindBlock.size() << '\n';
+
+    // Put all BB in the switch
+    for (std::vector<BasicBlock *>::iterator b = origBB.begin();
+         b != origBB.end(); ++b) {
+
+      if (std::find(unwindBlock.begin(), unwindBlock.end(), *b) !=
+          unwindBlock.end()) {
+        continue;
+      }
+
       BasicBlock *i = *b;
       ConstantInt *numCase = NULL;
 
-      // Move the BB inside the switch (only visual, no code logic)
-      //i->moveBefore(loopEnd);
-
       // Add case to switch
       auto keyTrue = bbmap.find(*b)->second;
-      if (canLog) {
-        llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
-                             llvm::sys::fs::OpenFlags::OF_Append)
-            << "Add Case " << keyTrue << '\n';
-      }
+
       numCase = cast<ConstantInt>(ConstantInt::get(
           switchI->getCondition()->getType(), APInt(64, keyTrue)));
       switchI->addCase(numCase, i);
     }
 
-
-
     // 再add一个DestroyStack的BasicBlock,用来干扰IDA的F5
-    if (canLog) {
-      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
-                           llvm::sys::fs::OpenFlags::OF_Append)
-          << "Add unreachable DestroyStack BasicBlock" << '\n';
-    }
-    BasicBlock *destoryStackBlock =
-        BasicBlock::Create(F.getContext(), "DestroyStack", &F);
-    builder.SetInsertPoint(destoryStackBlock);
-    std::string asm_str = "sub rsp,0x13371337";
-    llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
-        llvm::FunctionType::get(
-            llvm::Type::getVoidTy(F.getParent()->getContext()), false),
-        asm_str, "", false, false, llvm::InlineAsm::AD_Intel);
-    builder.CreateCall(inlineAsm);
-    builder.CreateRetVoid();
+    // if (canLog) {
+    //  llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
+    //                       llvm::sys::fs::OpenFlags::OF_Append)
+    //      << "Add unreachable DestroyStack BasicBlock" << '\n';
+    //}
+    // BasicBlock *destoryStackBlock =
+    //    BasicBlock::Create(F.getContext(), "DestroyStack", &F);
+    // builder.SetInsertPoint(destoryStackBlock);
+    // std::string asm_str = "sub rsp,0x13371337";
+    // llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
+    //    llvm::FunctionType::get(
+    //        llvm::Type::getVoidTy(F.getParent()->getContext()), false),
+    //    asm_str, "", false, false, llvm::InlineAsm::AD_Intel);
+    // builder.CreateCall(inlineAsm);
+    // builder.CreateRetVoid();
 
-    switchI->addCase(
-        cast<ConstantInt>(ConstantInt::get(switchI->getCondition()->getType(),
-                                           APInt(64, 0x1234567887654321))),
-        destoryStackBlock);
+    // switchI->addCase(
+    //    cast<ConstantInt>(ConstantInt::get(switchI->getCondition()->getType(),
+    //                                       APInt(64, 0x1234567887654321))),
+    //    destoryStackBlock);
 
-
-
-
+    std::remove_if(origBB.begin(), origBB.end(), [&](llvm::BasicBlock *bb) {
+      if (std::find(unwindBlock.begin(), unwindBlock.end(), bb) !=
+          unwindBlock.end()) {
+        return true;
+      } else
+        return false;
+    });
 
     for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin();
          b != origBB.end(); ++b) {
       BasicBlock *i = *b;
       ConstantInt *numCase = NULL;
 
+      // 返回块不需要Patch到loopEntry了
       if (i->getTerminator()->getNumSuccessors() == 0) {
         continue;
       }
 
-      // 条件分支
+      outs << "bb dump ";
+      (*b)->print(outs);
+      outs << "bb dump end " << '\n';
+      outs << "Num Successors " << i->getTerminator()->getNumSuccessors()
+           << '\n';
+      outs << "is InvokeInst "
+           << ((isa<InvokeInst>(i->getTerminator())) ? "True" : "False")
+           << '\n';
+
+      // 条件分支,并且最后不是Invoke指令
       if (i->getTerminator()->getNumSuccessors() == 2) {
         auto bbTrue = i->getTerminator()->getSuccessor(0);
         auto bbFalse = i->getTerminator()->getSuccessor(1);
@@ -932,7 +995,11 @@ struct Flattening : public PassInfoMixin<Flattening> {
         auto numCaseFalse = cast<ConstantInt>(ConstantInt::get(
             switchI->getCondition()->getType(), APInt(64, keyFalse)));
 
+        if (isa<InvokeInst>(i->getTerminator()))
+          continue;
+
         BranchInst *br = cast<BranchInst>(i->getTerminator());
+
         // 他这个其实是根据上一个分支的condition来决定下一个State
         SelectInst *sel =
             SelectInst::Create(br->getCondition(), numCaseTrue, numCaseFalse,
@@ -946,6 +1013,8 @@ struct Flattening : public PassInfoMixin<Flattening> {
 
       if (i->getTerminator()->getNumSuccessors() == 1) {
         BasicBlock *succ = i->getTerminator()->getSuccessor(0);
+
+        // 原来是跳到下一个基本块
         i->getTerminator()->eraseFromParent();
 
         auto keySucc = bbmap.find(succ)->second;
@@ -953,22 +1022,21 @@ struct Flattening : public PassInfoMixin<Flattening> {
             ConstantInt::get(switchI->getCondition()->getType(), keySucc));
 
         new StoreInst(numCase, load->getPointerOperand(), i);
+        // 直接跳到Switch末尾分发
         BranchInst::Create(loopEnd, i);
         continue;
       }
+
+      outs << "Error : Unreachable block\n";
     }
-    fixStack(F);
 
+    if (canLog) {
+      F.print(outs_ir_after);
+    }
+    outs << "Flattening Done" << '\n';
 
-    llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
-                         llvm::sys::fs::OpenFlags::OF_Append)
-        << "Flattening Done" << '\n';
-
-    // 断点调试
-    F.print(llvm::outs());
     return PreservedAnalyses::none();
   }
-
 
 };
 
@@ -1792,7 +1860,10 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     // MSVC macro rebuilding pass (this pass must be at the top)
     MPM.addPassToFront(MSVCMacroRebuildingPass());
 
+    MPM.addPass(createModuleToFunctionPassAdaptor(LowerSwitchPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(Flattening()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(RegToMemPass()));
+    
   }
 
   // Post pass
