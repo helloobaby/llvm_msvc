@@ -904,9 +904,13 @@ struct Flattening : public PassInfoMixin<Flattening> {
     for (std::vector<BasicBlock *>::iterator b = origBB.begin();
          b != origBB.end(); ++b) {
       if (isa<InvokeInst>((*b)->getTerminator())) {
-        // unwind块不能加到case里的
+        // 收集unwindBlock
         InvokeInst *Invoke = cast<InvokeInst>((*b)->getTerminator());
         unwindBlock.push_back(Invoke->getUnwindDest());
+
+        outs << "dump unwind block";
+        (*b)->print(outs);
+        outs << "dump end";
       }
     }
 
