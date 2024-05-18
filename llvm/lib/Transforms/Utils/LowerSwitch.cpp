@@ -545,6 +545,7 @@ bool LowerSwitch(Function &F, LazyValueInfo *LVI, AssumptionCache *AC) {
     if (DeleteList.count(&Cur))
       continue;
 
+    // 判断这个BasicBlock末尾是不是Switch指令
     if (SwitchInst *SI = dyn_cast<SwitchInst>(Cur.getTerminator())) {
       Changed = true;
       ProcessSwitchInst(SI, DeleteList, AC, LVI);

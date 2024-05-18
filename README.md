@@ -80,7 +80,7 @@ https://learn.microsoft.com/en-us/cpp/build/clang-support-msbuild?view=msvc-170
 <Project>
   <PropertyGroup>
     <LLVMInstallDir>C:\RelWithDebInfo</LLVMInstallDir>
-    <LLVMToolsVersion>777</LLVMToolsVersion>
+    <LLVMToolsVersion>18</LLVMToolsVersion>
   </PropertyGroup>
 </Project>
 ```

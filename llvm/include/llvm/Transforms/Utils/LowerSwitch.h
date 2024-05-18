@@ -19,6 +19,7 @@
 
 namespace llvm {
 struct LowerSwitchPass : public PassInfoMixin<LowerSwitchPass> {
+  static bool isRequired() { return true; }
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
 } // namespace llvm

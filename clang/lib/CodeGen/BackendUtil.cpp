@@ -806,7 +806,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
         llvm::raw_fd_ostream("builddbg/FlatteningIrDumpAfter.txt", e,
                              llvm::sys::fs::OpenFlags::OF_Append);
     if (canLog) {
-      outs << "Flattening Obf Funtion " << F.getName() << '\n';
+      outs << "Flattening Funtion " << F.getName() << '\n';
       F.print(outs_ir);
       outs_ir << '\n';
       outs_ir << '\n';
@@ -911,6 +911,25 @@ struct Flattening : public PassInfoMixin<Flattening> {
         outs << "dump unwind block";
         (*b)->print(outs);
         outs << "dump end";
+      } else if((*b)->isEHPad() || (*b)->isLandingPad()){
+        // 收集EHPad
+        unwindBlock.push_back(*b);
+        outs << "dump EHPad block";
+        (*b)->print(outs);
+        outs << "dump end";
+      } else {
+        for (auto it = (*b)->begin(); it != (*b)->end(); it++) {
+          if (auto*CPI = dyn_cast<CatchPadInst>(it)) {
+            unwindBlock.push_back(*b);
+          } else if (auto *CPI = dyn_cast<LandingPadInst>(it)) {
+            unwindBlock.push_back(*b);
+          } else if (auto *CPI = dyn_cast<CleanupPadInst>(it)) {
+            unwindBlock.push_back(*b);
+          } else if (auto *CPI = dyn_cast<CatchSwitchInst>(it)) {
+            unwindBlock.push_back(*b);
+          }
+        }
+      
       }
     }
 
@@ -922,6 +941,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
 
       if (std::find(unwindBlock.begin(), unwindBlock.end(), *b) !=
           unwindBlock.end()) {
+        outs << "skip Block \n";
         continue;
       }
 
@@ -937,34 +957,37 @@ struct Flattening : public PassInfoMixin<Flattening> {
     }
 
     // 再add一个DestroyStack的BasicBlock,用来干扰IDA的F5
-    // if (canLog) {
-    //  llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
-    //                       llvm::sys::fs::OpenFlags::OF_Append)
-    //      << "Add unreachable DestroyStack BasicBlock" << '\n';
-    //}
-    // BasicBlock *destoryStackBlock =
+    if (canLog) {
+      llvm::raw_fd_ostream("builddbg/FlatteningPass.txt", e,
+                           llvm::sys::fs::OpenFlags::OF_Append)
+          << "Add unreachable DestroyStack BasicBlock" << '\n';
+    }
+
+    //BasicBlock *destoryStackBlock =
     //    BasicBlock::Create(F.getContext(), "DestroyStack", &F);
-    // builder.SetInsertPoint(destoryStackBlock);
-    // std::string asm_str = "sub rsp,0x13371337";
-    // llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
+    //builder.SetInsertPoint(destoryStackBlock);
+    //std::string asm_str = "sub rsp,0x13371337";
+    //llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
     //    llvm::FunctionType::get(
     //        llvm::Type::getVoidTy(F.getParent()->getContext()), false),
     //    asm_str, "", false, false, llvm::InlineAsm::AD_Intel);
-    // builder.CreateCall(inlineAsm);
-    // builder.CreateRetVoid();
+    //builder.CreateCall(inlineAsm);
+    //builder.CreateRetVoid();
 
-    // switchI->addCase(
+    //switchI->addCase(
     //    cast<ConstantInt>(ConstantInt::get(switchI->getCondition()->getType(),
     //                                       APInt(64, 0x1234567887654321))),
     //    destoryStackBlock);
 
-    std::remove_if(origBB.begin(), origBB.end(), [&](llvm::BasicBlock *bb) {
-      if (std::find(unwindBlock.begin(), unwindBlock.end(), bb) !=
-          unwindBlock.end()) {
-        return true;
-      } else
-        return false;
-    });
+    auto iter =
+        std::remove_if(origBB.begin(), origBB.end(), [&](llvm::BasicBlock *bb) {
+          if (std::find(unwindBlock.begin(), unwindBlock.end(), bb) !=
+              unwindBlock.end()) {
+            return true;
+          } else
+            return false;
+        });
+    origBB.erase(iter, origBB.end());
 
     for (std::vector<llvm::BasicBlock *>::iterator b = origBB.begin();
          b != origBB.end(); ++b) {
@@ -1038,7 +1061,6 @@ struct Flattening : public PassInfoMixin<Flattening> {
       F.print(outs_ir_after);
     }
     outs << "Flattening Done" << '\n';
-
     return PreservedAnalyses::none();
   }
 
@@ -1867,6 +1889,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     MPM.addPass(createModuleToFunctionPassAdaptor(LowerSwitchPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(Flattening()));
     MPM.addPass(createModuleToFunctionPassAdaptor(RegToMemPass()));
+    //MPM.addPass(VerifierPass());
     
   }
 

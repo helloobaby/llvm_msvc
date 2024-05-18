@@ -19,6 +19,7 @@ namespace llvm {
 
 class RegToMemPass : public PassInfoMixin<RegToMemPass> {
 public:
+  static bool isRequired() { return true; }
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
 
