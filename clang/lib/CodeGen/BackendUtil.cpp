@@ -903,7 +903,14 @@ struct Flattening : public PassInfoMixin<Flattening> {
     std::vector<BasicBlock *> unwindBlock;
     for (std::vector<BasicBlock *>::iterator b = origBB.begin();
          b != origBB.end(); ++b) {
-      if (isa<InvokeInst>((*b)->getTerminator())) {
+      if((*b)->isEHPad() || (*b)->isLandingPad()){
+        // 收集EHPad
+        unwindBlock.push_back(*b);
+        outs << "dump EHPad block";
+        (*b)->print(outs);
+        outs << "dump end";
+      }
+      else if (isa<InvokeInst>((*b)->getTerminator())) {
         // 收集unwindBlock
         InvokeInst *Invoke = cast<InvokeInst>((*b)->getTerminator());
         unwindBlock.push_back(Invoke->getUnwindDest());
@@ -911,26 +918,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
         outs << "dump unwind block";
         (*b)->print(outs);
         outs << "dump end";
-      } else if((*b)->isEHPad() || (*b)->isLandingPad()){
-        // 收集EHPad
-        unwindBlock.push_back(*b);
-        outs << "dump EHPad block";
-        (*b)->print(outs);
-        outs << "dump end";
-      } else {
-        for (auto it = (*b)->begin(); it != (*b)->end(); it++) {
-          if (auto*CPI = dyn_cast<CatchPadInst>(it)) {
-            unwindBlock.push_back(*b);
-          } else if (auto *CPI = dyn_cast<LandingPadInst>(it)) {
-            unwindBlock.push_back(*b);
-          } else if (auto *CPI = dyn_cast<CleanupPadInst>(it)) {
-            unwindBlock.push_back(*b);
-          } else if (auto *CPI = dyn_cast<CatchSwitchInst>(it)) {
-            unwindBlock.push_back(*b);
-          }
-        }
-      
-      }
+      } 
     }
 
     outs << "unwindBlock size " << unwindBlock.size() << '\n';
