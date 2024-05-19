@@ -115,6 +115,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FileSystem.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -122,6 +123,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <filesystem>
 
 using namespace llvm;
 
@@ -380,6 +382,12 @@ public:
     assert(F.getParent() == &M &&
            "An instance of this class only works with a specific module!");
 
+    std::error_code e;
+    bool canLog = std::filesystem::create_directory("builddbg");
+    canLog |= std::filesystem::exists("builddbg");
+    llvm::raw_fd_ostream outs = llvm::raw_fd_ostream(
+        "builddbg/FlatteningPass.txt", e, llvm::sys::fs::OpenFlags::OF_Append);
+
     // First ensure the function is well-enough formed to compute dominance
     // information, and directly compute a dominance tree. We don't rely on the
     // pass manager to provide this as it isolates us from a potentially
@@ -409,6 +417,7 @@ public:
 
     Broken = false;
     // FIXME: We strip const here because the inst visitor strips const.
+    outs << "Verify Pass Visit Function " << F.getName() << '\n';
     visit(const_cast<Function &>(F));
     verifySiblingFuncletUnwinds();
 
@@ -1836,6 +1845,7 @@ void Verifier::verifyAttributeTypes(AttributeSet Attrs, const Value *V) {
   }
 
 #include "llvm/IR/Attributes.inc"
+#include <llvm/Support/FileSystem.h>
       continue;
     }
 
@@ -4645,6 +4655,15 @@ void Verifier::verifyDominatesUse(Instruction &I, unsigned i) {
     return;
 
   const Use &U = I.getOperandUse(i);
+  std::error_code e;
+  bool canLog = std::filesystem::create_directory("builddbg");
+  canLog |= std::filesystem::exists("builddbg");
+  llvm::raw_fd_ostream outs = llvm::raw_fd_ostream(
+      "builddbg/FlatteningPass.txt", e, llvm::sys::fs::OpenFlags::OF_Append);
+
+  if (!DT.dominates(Op, U)) {
+    outs << "Verify FAIL\n";
+  }
   Check(DT.dominates(Op, U), "Instruction does not dominate all uses!", Op, &I);
 }
 

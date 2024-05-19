@@ -820,7 +820,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
     // No need to do flattening if only there is only one block
     if (F.size() <= 1) {
       if (canLog) {
-        outs << "Function Size less 1" << '\n';
+        outs << "Function Size less or equal 1" << '\n';
       }
       return PreservedAnalyses::all();
     }
@@ -881,6 +881,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
                   switchVar, insert);
 
     loopEntry = BasicBlock::Create(F.getContext(), "loopEntry", &F);
+    loopEntry->moveAfter(&*F.begin());
     loopEnd = BasicBlock::Create(F.getContext(), "loopEnd", &F);
     load = new LoadInst(llvm::Type::getInt64Ty(F.getContext()), switchVar,
                         "switchVar", loopEntry);
@@ -903,16 +904,19 @@ struct Flattening : public PassInfoMixin<Flattening> {
     std::vector<BasicBlock *> unwindBlock;
     for (std::vector<BasicBlock *>::iterator b = origBB.begin();
          b != origBB.end(); ++b) {
+      // 异常块的cfg保持不变
       if((*b)->isEHPad() || (*b)->isLandingPad()){
-        // 收集EHPad
         unwindBlock.push_back(*b);
         outs << "dump EHPad block";
         (*b)->print(outs);
         outs << "dump end";
       }
       else if (isa<InvokeInst>((*b)->getTerminator())) {
-        // 收集unwindBlock
+        // unwind块的cfg保持不变
         InvokeInst *Invoke = cast<InvokeInst>((*b)->getTerminator());
+        if (!Invoke->getUnwindDest()) {
+          outs << "Invoke->getUnwindDest return nullptr";
+        }
         unwindBlock.push_back(Invoke->getUnwindDest());
 
         outs << "dump unwind block";
@@ -1408,6 +1412,9 @@ bool EmitAssemblyHelper::AddEmitPasses(legacy::PassManager &CodeGenPasses,
 }
 
 static OptimizationLevel mapToLevel(const CodeGenOptions &Opts) {
+  // 限制在O0 , 因为这个版本的Release也就是O2会崩溃,目前找不到问题出在哪
+  return OptimizationLevel::O0;
+
   switch (Opts.OptimizationLevel) {
   default:
     llvm_unreachable("Invalid optimization level!");
@@ -1567,7 +1574,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     BackendAction Action, std::unique_ptr<raw_pwrite_stream> &OS,
     std::unique_ptr<llvm::ToolOutputFile> &ThinLinkOS, BackendConsumer *BC) {
   std::optional<PGOOptions> PGOOpt;
-
+  
   if (CodeGenOpts.hasProfileIRInstr())
     // -fprofile-generate.
     PGOOpt = PGOOptions(
