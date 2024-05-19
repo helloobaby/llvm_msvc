@@ -786,7 +786,20 @@ void fixStack(Function &F) {
     }
   } while (tmpReg.size() != 0 || tmpPhi.size() != 0);
 }
-
+bool hasCppExceptionHandling(const Function *F) {
+  for (const BasicBlock &BB : *F) {
+    for (const Instruction &I : BB) {
+      // 检查是否存在 invoke void @_CxxThrowException 指令
+      if (auto *II = dyn_cast<InvokeInst>(&I)) {
+        if (II->getCalledFunction() &&
+            II->getCalledFunction()->getName() == "_CxxThrowException") {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
 struct Flattening : public PassInfoMixin<Flattening> {
   virtual StringRef getPassName() const { return "CFG Flattening"; }
   static bool isRequired() { return true; }
@@ -824,6 +837,15 @@ struct Flattening : public PassInfoMixin<Flattening> {
       }
       return PreservedAnalyses::all();
     }
+
+    // 目前支持windows操作系统的本身的异常机制,但是不支持C++语言的异常机制(编译出来的项目一定情况下会崩或死循环,不知道为啥,我看IR是没问题的)
+    if (hasCppExceptionHandling(&F)) {
+      if (canLog) {
+        outs << "Function has CXX Exception handling " << F.getName() << '\n';
+      }
+      return PreservedAnalyses::all();
+    }
+
 
     std::vector<llvm::BasicBlock *> origBB;
 
@@ -1884,7 +1906,6 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
     MPM.addPass(createModuleToFunctionPassAdaptor(LowerSwitchPass()));
     MPM.addPass(createModuleToFunctionPassAdaptor(Flattening()));
     MPM.addPass(createModuleToFunctionPassAdaptor(RegToMemPass()));
-    //MPM.addPass(VerifierPass());
     
   }
 
