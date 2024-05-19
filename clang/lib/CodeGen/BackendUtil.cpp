@@ -955,16 +955,17 @@ struct Flattening : public PassInfoMixin<Flattening> {
           << "Add unreachable DestroyStack BasicBlock" << '\n';
     }
 
-    //BasicBlock *destoryStackBlock =
-    //    BasicBlock::Create(F.getContext(), "DestroyStack", &F);
-    //builder.SetInsertPoint(destoryStackBlock);
-    //std::string asm_str = "sub rsp,0x13371337";
-    //llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
-    //    llvm::FunctionType::get(
-    //        llvm::Type::getVoidTy(F.getParent()->getContext()), false),
-    //    asm_str, "", false, false, llvm::InlineAsm::AD_Intel);
-    //builder.CreateCall(inlineAsm);
-    //builder.CreateRetVoid();
+    
+    BasicBlock *destoryStackBlock =
+        BasicBlock::Create(F.getContext(), "DestroyStack", &F);
+    builder.SetInsertPoint(destoryStackBlock);
+    std::string asm_str = "sub esp,0x13371337";
+    llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
+        llvm::FunctionType::get(
+            llvm::Type::getVoidTy(F.getParent()->getContext()), false),
+        asm_str, "", false, false, llvm::InlineAsm::AD_Intel);
+    builder.CreateCall(inlineAsm);
+    builder.CreateRetVoid();
 
     switchI->addCase(
         cast<ConstantInt>(ConstantInt::get(switchI->getCondition()->getType(),
@@ -990,6 +991,9 @@ struct Flattening : public PassInfoMixin<Flattening> {
       if (i->getTerminator()->getNumSuccessors() == 0) {
         continue;
       }
+
+      if (isa<CatchReturnInst>(i->getTerminator()))
+        continue;
 
       outs << "bb dump ";
       (*b)->print(outs);
