@@ -968,7 +968,7 @@ struct Flattening : public PassInfoMixin<Flattening> {
 
     switchI->addCase(
         cast<ConstantInt>(ConstantInt::get(switchI->getCondition()->getType(),
-                                           APInt(64, 0x1234567887654321))),
+                                           APInt(64, 0x13371337))),
         destoryStackBlock);
 
     auto iter =
