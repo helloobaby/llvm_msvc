@@ -786,17 +786,17 @@ void fixStack(Function &F) {
     }
   } while (tmpReg.size() != 0 || tmpPhi.size() != 0);
 }
+Function *getPersonalityFunction(const Function *F) {
+  if (F->hasPersonalityFn()) {
+    return dyn_cast<Function>(F->getPersonalityFn());
+  }
+  return nullptr;
+}
 bool hasCppExceptionHandling(const Function *F) {
-  for (const BasicBlock &BB : *F) {
-    for (const Instruction &I : BB) {
-      // 检查是否存在 invoke void @_CxxThrowException 指令
-      if (auto *II = dyn_cast<InvokeInst>(&I)) {
-        if (II->getCalledFunction() &&
-            II->getCalledFunction()->getName() == "_CxxThrowException") {
-          return true;
-        }
-      }
-    }
+  Function *PersonalityFn = getPersonalityFunction(F);
+  if (PersonalityFn &&
+      PersonalityFn->getName().find("__CxxFrameHandler") != std::string::npos) {
+    return true;
   }
   return false;
 }
