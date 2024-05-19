@@ -786,20 +786,7 @@ void fixStack(Function &F) {
     }
   } while (tmpReg.size() != 0 || tmpPhi.size() != 0);
 }
-Function *getPersonalityFunction(const Function *F) {
-  if (F->hasPersonalityFn()) {
-    return dyn_cast<Function>(F->getPersonalityFn());
-  }
-  return nullptr;
-}
-bool hasCppExceptionHandling(const Function *F) {
-  Function *PersonalityFn = getPersonalityFunction(F);
-  if (PersonalityFn &&
-      PersonalityFn->getName().find("__CxxFrameHandler") != std::string::npos) {
-    return true;
-  }
-  return false;
-}
+
 struct Flattening : public PassInfoMixin<Flattening> {
   virtual StringRef getPassName() const { return "CFG Flattening"; }
   static bool isRequired() { return true; }
@@ -837,15 +824,6 @@ struct Flattening : public PassInfoMixin<Flattening> {
       }
       return PreservedAnalyses::all();
     }
-
-    // 目前支持windows操作系统的本身的异常机制,但是不支持C++语言的异常机制(编译出来的项目一定情况下会崩或死循环,不知道为啥,我看IR是没问题的)
-    if (hasCppExceptionHandling(&F)) {
-      if (canLog) {
-        outs << "Function has CXX Exception handling " << F.getName() << '\n';
-      }
-      return PreservedAnalyses::all();
-    }
-
 
     std::vector<llvm::BasicBlock *> origBB;
 
@@ -977,16 +955,16 @@ struct Flattening : public PassInfoMixin<Flattening> {
           << "Add unreachable DestroyStack BasicBlock" << '\n';
     }
 
-    BasicBlock *destoryStackBlock =
-        BasicBlock::Create(F.getContext(), "DestroyStack", &F);
-    builder.SetInsertPoint(destoryStackBlock);
-    std::string asm_str = "sub rsp,0x13371337";
-    llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
-        llvm::FunctionType::get(
-            llvm::Type::getVoidTy(F.getParent()->getContext()), false),
-        asm_str, "", false, false, llvm::InlineAsm::AD_Intel);
-    builder.CreateCall(inlineAsm);
-    builder.CreateRetVoid();
+    //BasicBlock *destoryStackBlock =
+    //    BasicBlock::Create(F.getContext(), "DestroyStack", &F);
+    //builder.SetInsertPoint(destoryStackBlock);
+    //std::string asm_str = "sub rsp,0x13371337";
+    //llvm::InlineAsm *inlineAsm = llvm::InlineAsm::get(
+    //    llvm::FunctionType::get(
+    //        llvm::Type::getVoidTy(F.getParent()->getContext()), false),
+    //    asm_str, "", false, false, llvm::InlineAsm::AD_Intel);
+    //builder.CreateCall(inlineAsm);
+    //builder.CreateRetVoid();
 
     switchI->addCase(
         cast<ConstantInt>(ConstantInt::get(switchI->getCondition()->getType(),
